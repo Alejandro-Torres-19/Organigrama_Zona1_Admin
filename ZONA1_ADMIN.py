@@ -74,7 +74,7 @@ else:
     st.stop()
 
   # DEFINICIÓN DE LA FUNCIÓN DE LECTURA CON CACHÉ
-  @st.cache_data(ttl=5)
+  @st.cache_data(ttl=2)
   def cargar_datos_hoja():
     rows = sheet.get_all_values()
     if len(rows) > 1:
@@ -169,7 +169,7 @@ else:
       ]
 
       sheet.append_row(nueva_fila)
-      cargar_datos_hoja.clear()
+      st.cache_data.clear()
       st.sidebar.success("✅ Actividad guardada con éxito")
       st.rerun()
 
@@ -210,11 +210,11 @@ else:
               break
 
           if fila_real_hoy:
-            sheet.update(
-                range_name=f"H{fila_real_hoy}",
-                values=[["TRUE" if checked else "FALSE"]],
+            # ACTUALIZAR MEDIANTE NUMERO DE FILA Y COLUMNA DIRECTA (Columna 8 = H)
+            sheet.update_cell(
+                fila_real_hoy, 8, "TRUE" if checked else "FALSE"
             )
-            cargar_datos_hoja.clear()
+            st.cache_data.clear()
             st.rerun()
 
       with col_info:
@@ -243,7 +243,7 @@ else:
       unsafe_allow_html=True,
   )
 
-  # PESTAÑAS (Dentro de la sesión iniciada)
+  # PESTAÑAS
   tab_calendario, tab_registro = st.tabs(
       ["📅 Vista Calendario", "📋 Lista de Tareas y Gestión"]
   )
@@ -357,17 +357,17 @@ else:
                   break
 
               if fila_real:
-                sheet.update(range_name=f"H{fila_real}", values=[["TRUE"]])
-                cargar_datos_hoja.clear()
+                # SE USA UPDATE_CELL (Fila exactas, Columna 8 = H)
+                sheet.update_cell(fila_real, 8, "TRUE")
+
+                # LIMPIAR CACHÉ GENERAL DE STREAMLIT Y FORZAR RERUN
+                st.cache_data.clear()
                 st.rerun()
               else:
                 st.error("No se encontró el ID de la actividad en la hoja.")
         st.divider()
     else:
       st.info("No hay tareas registradas")
-
-
-
 
 
 
