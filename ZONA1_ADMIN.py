@@ -358,7 +358,3 @@ else:
         st.divider()
     else:
       st.info("No hay tareas registradas")
-                st.rerun()
-        st.divider()
-    else:
-      st.info("No hay tareas registradas")
