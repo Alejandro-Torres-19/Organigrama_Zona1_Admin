@@ -12,6 +12,30 @@ st.set_page_config(
     page_title="CRONOGRAMA Zona 1 (Admin)", page_icon="🔒", layout="wide"
 )
 
+# ESTILOS CSS PARA PERMITIR MULTILÍNEA Y EXPANDIR CELDAS EN EL CALENDARIO
+st.markdown(
+    """
+    <style>
+    /* Permite que el texto del evento se ajuste en varias líneas y no se corte con "..." */
+    .fc-event-main {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        height: auto !important;
+    }
+    .fc-daygrid-event {
+        white-space: normal !important;
+        align-items: normal !important;
+    }
+    /* Expande la altura mínima de las celdas del mes para dar espacio a textos largos */
+    .fc-daygrid-day-frame {
+        min-height: 120px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # DEFINIR CONTRASEÑA CORRECTA
 PASWORD_CORRECTA = "Taguch_77"
 
@@ -72,6 +96,7 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
+
   # OBTENER DATOS CON CACHÉ Y PROTECCIÓN CONTRA CUOTAS (TTL=2)
   @st.cache_data(ttl=2)
   def obtener_datos_actualizados():
@@ -100,7 +125,9 @@ else:
         columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
     )
 
+
   df_actividades = obtener_datos_actualizados()
+
 
   # CALLBACK DIRECTO PARA ACTUALIZACIÓN INSTANTÁNEA
   def completar_tarea_callback(fila_index, nuevo_estado=True):
@@ -115,6 +142,7 @@ else:
       st.cache_data.clear()
     except Exception as err:
       st.error(f"Error al escribir en Google Sheets: {err}")
+
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -274,6 +302,7 @@ else:
       "initialView": "dayGridMonth",
       "displayEventTime": False,
       "eventDisplay": "block",
+      "dayMaxEvents": False,  # <-- Permite visualizar todo el texto largo sin recortarlo
       "selectable": True,
       "editable": False,
   }
@@ -302,18 +331,18 @@ else:
       if "T" in inicio_raw:
         partes = inicio_raw.split("T")
         try:
-          fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime(
-              "%d-%m-%Y"
-          )
+          fecha_fmt = datetime.datetime.strptime(
+              partes[0], "%Y-%m-%d"
+          ).strftime("%d-%m-%Y")
         except:
           fecha_fmt = partes[0]
         hora_fmt = partes[1][:5]
       elif " " in inicio_raw:
         partes = inicio_raw.split(" ")
         try:
-          fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime(
-              "%d-%m-%Y"
-          )
+          fecha_fmt = datetime.datetime.strptime(
+              partes[0], "%Y-%m-%d"
+          ).strftime("%d-%m-%Y")
         except:
           fecha_fmt = partes[0]
         hora_fmt = partes[1][:5]
