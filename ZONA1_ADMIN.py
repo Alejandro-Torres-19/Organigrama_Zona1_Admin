@@ -17,7 +17,6 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Estilos generales de apoyo por si el componente los hereda */
     .fc-event-title {
         white-space: normal !important;
         overflow: visible !important;
@@ -53,8 +52,7 @@ def conectar_google_sheets():
       "https://www.googleapis.com/auth/drive",
   ]
   creds_dict = dict(st.secrets["gcp_service_account"])
-  creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-  client = gspread.authorize(creds)
+  client = gspread.service_account_from_dict(creds_dict)
   sheet = client.open("ORGANIGRAMA_ZONA1").sheet1
   return sheet
 
@@ -120,19 +118,27 @@ else:
   df_actividades = obtener_datos_actualizados()
 
 
-  # CALLBACK DIRECTO PARA ACTUALIZACIÓN INSTANTÁNEA
-  def completar_tarea_callback(fila_index, nuevo_estado=True):
+  # CALLBACK: MUEVE LA TAREA A LA PESTAÑA "Completadas" Y LA BORRA DE LA PRINCIPAL
+  def completar_tarea_callback(fila_index):
     try:
       num_fila_sheets = int(fila_index) + 2
-      valor_escribir = "Completada" if nuevo_estado else "Pendiente"
+      row_data = sheet.row_values(num_fila_sheets)
 
-      # Escribir en Columna 6 (F: Estado / Finalizada)
-      sheet.update_cell(num_fila_sheets, 6, valor_escribir)
+      client = sheet.client
+      try:
+        sheet_completadas = client.open("ORGANIGRAMA_ZONA1").worksheet(
+            "Completadas"
+        )
+      except:
+        sheet_completadas = client.open("ORGANIGRAMA_ZONA1").add_worksheet(
+            title="Completadas", rows=100, cols=10
+        )
 
-      # Invalida caché para refrescar
+      sheet_completadas.append_row(row_data)
+      sheet.delete_rows(num_fila_sheets)
       st.cache_data.clear()
     except Exception as err:
-      st.error(f"Error al escribir en Google Sheets: {err}")
+      st.error(f"Error al procesar la tarea completada: {err}")
 
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
@@ -222,30 +228,10 @@ else:
 
   if actividades_hoy:
     for idx, row in actividades_hoy:
-      val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
-      )
-      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
-
-      col_check, col_info = st.columns([0.08, 0.92])
-
-      with col_check:
-        st.checkbox(
-            "",
-            value=is_finalizada,
-            key=f"check_hoy_{idx}_{titulo}",
-            on_change=completar_tarea_callback,
-            args=(idx, not is_finalizada),
-        )
-
-      with col_info:
-        candado = "🔒 " if es_priv else ""
-        if is_finalizada:
-          st.markdown(f"~~{candado}**{titulo}**~~ (🟢 *Completada*)")
-        else:
-          st.markdown(f"🟡 **{candado}{titulo}** *(Pendiente)*")
+      candado = "🔒 " if es_priv else ""
+      st.markdown(f"🟡 **{candado}{titulo}** *(Pendiente)*")
   else:
     st.info("🎉 ¡No hay actividades pendientes para hoy!")
 
@@ -259,26 +245,18 @@ else:
     for idx, row in df_actividades.iterrows():
       is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
       is_private = str(row.get("Privado", "false")).upper() == "TRUE"
-      val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
-      )
-      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
 
       titulo_display = str(row.get("Actividad", "Sin Nombre"))
       if is_private:
         titulo_display = f"🔒 {titulo_display}"
-      if is_finalizada:
-        titulo_display = f"✅ {titulo_display}"
-
-      color_evento = "#28a745" if is_finalizada else color_seleccionado
 
       evento = {
           "title": titulo_display,
           "start": str(row.get("Inicio", "")),
           "end": str(row.get("Fin", "")),
           "allDay": is_all_day,
-          "backgroundColor": color_evento,
-          "borderColor": color_evento,
+          "backgroundColor": color_seleccionado,
+          "borderColor": color_seleccionado,
           "textColor": "#FFFFFF",
           "display": "block",
       }
@@ -296,16 +274,23 @@ else:
       "dayMaxEvents": False,
       "selectable": True,
       "editable": False,
+      "locale": "es",
+      "buttonText": {
+          "today": "Hoy",
+          "month": "Mes",
+          "week": "Semana",
+          "day": "Día",
+          "list": "Agenda",
+      },
   }
 
-  # Renderizado del calendario
   calendar(
       events=eventos_calendario,
       options=calendar_options,
       key="calendario_principal_fijo",
   )
 
-  # INYECCIÓN DE JS PARA FORZAR EL ESTILO MULTILÍNEA EN EL DOM DEL CALENDARIO
+  # INYECCIÓN DE JS PARA FORZAR EL ESTILO MULTILÍNEA
   components.html(
       """
     <script>
@@ -336,39 +321,27 @@ else:
 
   if not df_actividades.empty:
     for idx, row in df_actividades.iterrows():
-      val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
-      )
-      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
       inicio_raw = str(row.get("Inicio", ""))
       titulo_act = str(row.get("Actividad", ""))
 
-      if "T" in inicio_raw:
-        partes = inicio_raw.split("T")
-        try:
-          fecha_fmt = datetime.datetime.strptime(
-              partes[0], "%Y-%m-%d"
-          ).strftime("%d-%m-%Y")
-        except:
-          fecha_fmt = partes[0]
-        hora_fmt = partes[1][:5]
-      elif " " in inicio_raw:
-        partes = inicio_raw.split(" ")
-        try:
-          fecha_fmt = datetime.datetime.strptime(
-              partes[0], "%Y-%m-%d"
-          ).strftime("%d-%m-%Y")
-        except:
-          fecha_fmt = partes[0]
-        hora_fmt = partes[1][:5]
-      else:
-        try:
-          fecha_fmt = datetime.datetime.strptime(
-              inicio_raw, "%Y-%m-%d"
-          ).strftime("%d-%m-%Y")
-        except:
-          fecha_fmt = inicio_raw
-        hora_fmt = ""
+      fecha_fmt = inicio_raw
+      hora_fmt = ""
+
+      try:
+        if "T" in inicio_raw:
+          partes = inicio_raw.split("T")
+          fecha_fmt = pd.to_datetime(partes[0]).strftime("%d-%m-%Y")
+          if len(partes) > 1 and len(partes[1]) >= 5:
+            hora_fmt = partes[1][:5]
+        elif " " in inicio_raw:
+          partes = inicio_raw.split(" ")
+          fecha_fmt = pd.to_datetime(partes[0]).strftime("%d-%m-%Y")
+          if len(partes) > 1 and len(partes[1]) >= 5:
+            hora_fmt = partes[1][:5]
+        else:
+          fecha_fmt = pd.to_datetime(inicio_raw).strftime("%d-%m-%Y")
+      except Exception:
+        pass
 
       c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
 
@@ -379,20 +352,14 @@ else:
       with c3:
         st.write(titulo_act)
       with c4:
-        if is_finalizada:
-          st.markdown("🟢 **Completada**")
-        else:
-          st.markdown("🟡 **Pendiente**")
+        st.markdown("🟡 **Pendiente**")
       with c5:
-        if is_finalizada:
-          st.markdown("🟣 **Finalizada**")
-        else:
-          st.button(
-              "☑️ Marcar Lista",
-              key=f"btn_tab_gestion_{idx}",
-              on_click=completar_tarea_callback,
-              args=(idx, True),
-          )
+        st.button(
+            "☑️ Marcar Lista",
+            key=f"btn_tab_gestion_{idx}",
+            on_click=completar_tarea_callback,
+            args=(idx,),
+        )
       st.divider()
   else:
     st.info("No hay tareas registradas")
