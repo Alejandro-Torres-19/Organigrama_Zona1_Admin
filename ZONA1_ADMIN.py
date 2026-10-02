@@ -1,5 +1,6 @@
 # IMPORTAR DEPENDENCIAS NECESARIAS
 import datetime
+import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
@@ -71,57 +72,50 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  # CARGAR DATOS DIRECTAMENTE
+  # OBTENER DATOS CON CACHÉ Y PROTECCIÓN CONTRA CUOTAS (TTL=2)
+  @st.cache_data(ttl=2)
   def obtener_datos_actualizados():
-    rows = sheet.get_all_values()
-    if len(rows) > 1:
-      headers = [str(h).strip() for h in rows[0]]
-      data_rows = rows[1:]
-      df = pd.DataFrame(data_rows, columns=headers)
-      return df.loc[:, df.columns != ""]
-    else:
-      return pd.DataFrame(
-          columns=[
-              "Actividad",
-              "Inicio",
-              "Fin",
-              "AllDay",
-              "Privado",
-              "Estado",
-          ]
-      )
+    for intento in range(3):
+      try:
+        rows = sheet.get_all_values()
+        if len(rows) > 1:
+          headers = [str(h).strip() for h in rows[0]]
+          data_rows = rows[1:]
+          df = pd.DataFrame(data_rows, columns=headers)
+          return df.loc[:, df.columns != ""]
+        else:
+          return pd.DataFrame(
+              columns=[
+                  "Actividad",
+                  "Inicio",
+                  "Fin",
+                  "AllDay",
+                  "Privado",
+                  "Estado",
+              ]
+          )
+      except gspread.exceptions.APIError:
+        time.sleep(1)  # Esperar 1 segundo si salta error de cuota
+    return pd.DataFrame(
+        columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
+    )
 
-  # PERSISTENCIA EN SESSION STATE PARA EVITAR ERRORES EN PEASTATICAS/PESTAÑAS
-  if "df_actividades" not in st.session_state or st.sidebar.button(
-      "🔄 Recargar Datos"
-  ):
-    st.session_state.df_actividades = obtener_datos_actualizados()
+  df_actividades = obtener_datos_actualizados()
 
-  df_actividades = st.session_state.df_actividades
-
-  # FUNCIÓN CALLBACK QUE SE EJECUTA INMEDIATAMENTE AL HACER CLIC EN CUALQUIER BOTÓN O CHECKBOX
+  # CALLBACK DIRECTO PARA ACTUALIZACIÓN INSTANTÁNEA
   def completar_tarea_callback(fila_index, nuevo_estado=True):
     try:
-      # Número de fila física en Google Sheets (Encabezado es Fila 1)
+      # Número de fila real en Google Sheets (base 1 + encabezado)
       num_fila_sheets = int(fila_index) + 2
       valor_escribir = "Completada" if nuevo_estado else "Pendiente"
 
-      # Escribir directamente en la Columna 6 (F: Estado)
+      # Escribir directamente en la Columna 6 (F: Estado / Finalizada)
       sheet.update_cell(num_fila_sheets, 6, valor_escribir)
 
-      # Actualizar en la memoria local inmediatamente
-      st.session_state.df_actividades.at[fila_index, "Estado"] = valor_escribir
-      if "Finalizada" in st.session_state.df_actividades.columns:
-        st.session_state.df_actividades.at[fila_index, "Finalizada"] = (
-            valor_escribir
-        )
-
-      st.toast(
-          f"✅ Tarea actualizada a '{valor_escribir}' en Google Sheets",
-          icon="🎉",
-      )
+      # Invalida el caché local para refrescar los datos en pantalla
+      st.cache_data.clear()
     except Exception as err:
-      st.error(f"Error al actualizar en Google Sheets: {err}")
+      st.error(f"Error al escribir en Google Sheets: {err}")
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -192,7 +186,7 @@ else:
       ]
 
       sheet.append_row(nueva_fila)
-      st.session_state.df_actividades = obtener_datos_actualizados()
+      st.cache_data.clear()
       st.sidebar.success("✅ Actividad guardada con éxito")
       st.rerun()
 
@@ -211,9 +205,9 @@ else:
   if actividades_hoy:
     for idx, row in actividades_hoy:
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
       )
-      is_finalizada = val_est in ["completada", "true"]
+      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
 
@@ -266,9 +260,9 @@ else:
         is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
         val_est = (
-            str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+            str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
         )
-        is_finalizada = val_est in ["completada", "true"]
+        is_finalizada = val_est in ["COMPLETADA", "TRUE"]
 
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
         if is_private:
@@ -310,9 +304,9 @@ else:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
         val_est = (
-            str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+            str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
         )
-        is_finalizada = val_est in ["completada", "true"]
+        is_finalizada = val_est in ["COMPLETADA", "TRUE"]
         inicio_raw = str(row.get("Inicio", ""))
         titulo_act = str(row.get("Actividad", ""))
 
@@ -360,7 +354,6 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            # Botón con callback para asegurar la ejecución dentro de las pestañas
             st.button(
                 "☑️ Marcar Lista",
                 key=f"btn_tab_gestion_{idx}",
