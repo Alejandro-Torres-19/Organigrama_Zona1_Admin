@@ -105,18 +105,44 @@ else:
   df_actividades = obtener_datos_actualizados()
 
 
-  # FUNCIÓN DE ACTUALIZACIÓN DIRECTA EN GOOGLE SHEETS
-  def completar_tarea(fila_index, nuevo_estado=True):
+  # FUNCIÓN BLINDADA DE BÚSQUEDA Y ACTUALIZACIÓN POR TEXTO Y FECHA
+  def completar_tarea_por_datos(actividad_nom, inicio_val, nuevo_estado=True):
     try:
-      num_fila_sheets = int(fila_index) + 2
-      valor_escribir = "Completada" if nuevo_estado else "Pendiente"
+      filas_reales = sheet.get_all_values()
+      fila_encontrada = None
 
-      # Escribir en Columna 6 (F: Estado / Finalizada)
-      sheet.update_cell(num_fila_sheets, 6, valor_escribir)
+      target_nombre = str(actividad_nom).strip().lower()
+      target_inicio = str(inicio_val).strip().lower()
 
-      # Limpiar caché para reflejar el cambio inmediato
-      st.cache_data.clear()
-      return True
+      # 1. Búsqueda exacta combinando Nombre y Fecha de Inicio
+      for num_fila, fila in enumerate(filas_reales[1:], start=2):
+        if len(fila) >= 2:
+          nom_sheet = str(fila[0]).strip().lower()
+          ini_sheet = str(fila[1]).strip().lower()
+          if nom_sheet == target_nombre and ini_sheet == target_inicio:
+            fila_encontrada = num_fila
+            break
+
+      # 2. Búsqueda de respaldo por Nombre únicamente
+      if not fila_encontrada:
+        for num_fila, fila in enumerate(filas_reales[1:], start=2):
+          if len(fila) >= 1:
+            if str(fila[0]).strip().lower() == target_nombre:
+              fila_encontrada = num_fila
+              break
+
+      if fila_encontrada:
+        valor_escribir = "Completada" if nuevo_estado else "Pendiente"
+        # Columna 6 = Columna F (Estado)
+        sheet.update_cell(fila_encontrada, 6, valor_escribir)
+        st.cache_data.clear()
+        return True
+      else:
+        st.error(
+            f"No se encontró la actividad '{actividad_nom}' en Google Sheets."
+        )
+        return False
+
     except Exception as err:
       st.error(f"Error al escribir en Google Sheets: {err}")
       return False
@@ -215,15 +241,16 @@ else:
       is_finalizada = val_est in ["completada", "true"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
+      inicio_raw = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
       with col_check:
         estado_checkbox = st.checkbox(
-            "", value=is_finalizada, key=f"check_hoy_{idx}"
+            "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if estado_checkbox != is_finalizada:
-          if completar_tarea(idx, estado_checkbox):
+          if completar_tarea_por_datos(titulo, inicio_raw, estado_checkbox):
             st.rerun()
 
       with col_info:
@@ -347,9 +374,9 @@ else:
         if is_finalizada:
           st.markdown("🟣 **Finalizada**")
         else:
-          # Se usa un botón estándar que al presionarse ejecuta la función y recarga inmediatamente la app
-          if st.button("☑️ Marcar Lista", key=f"btn_gestion_{idx}"):
-            if completar_tarea(idx, True):
+          # Botón con clave única basada en el título y la fecha para garantizar respuesta inmediata
+          if st.button("☑️ Marcar Lista", key=f"btn_gestion_{idx}_{titulo_act}"):
+            if completar_tarea_por_datos(titulo_act, inicio_raw, True):
               st.rerun()
       st.divider()
   else:
