@@ -136,7 +136,6 @@ else:
         data_rows = rows[1:]
         return pd.DataFrame(data_rows, columns=headers)
       elif len(rows) == 1 and rows[0]:
-        # Si solo existen encabezados guardados
         headers = [str(h).strip() for h in rows[0]]
         return pd.DataFrame(columns=headers)
     except Exception:
@@ -146,11 +145,16 @@ else:
     )
 
 
-  # CALLBACK: MUEVE LA TAREA A LA PESTAÑA "Completadas" Y LA BORRA DE LA PRINCIPAL
+  # CALLBACK: MUEVE LA TAREA A LA PESTAÑA "Completadas", ACTUALIZA SU ESTADO Y LA BORRA DE LA PRINCIPAL
   def completar_tarea_callback(fila_index):
     try:
       num_fila_sheets = int(fila_index) + 2
       row_data = sheet.row_values(num_fila_sheets)
+
+      # Asegurar que el estado en la columna F (índice 5) cambie a "Completada"
+      while len(row_data) < 6:
+        row_data.append("")  # Rellenar si faltaran columnas
+      row_data[5] = "Completada"
 
       spreadsheet = sheet.spreadsheet
 
@@ -160,7 +164,6 @@ else:
         sheet_completadas = spreadsheet.add_worksheet(
             title="Completadas", rows=100, cols=10
         )
-        # Asegurar encabezados si se crea de cero
         if len(sheet.get_all_values()) > 0:
           sheet_completadas.append_row(sheet.row_values(1))
 
@@ -408,14 +411,12 @@ else:
   elif menu_opcion == "✅ Tareas Completadas":
     st.subheader("✅ Historial de Actividades Completadas")
     st.markdown(
-        "Aquí se muestran todas las tareas que han sido marcadas como listas"
-        " y guardadas en la hoja de datos."
+        "Aquí se muestran todas las tareas que han sido marcadas como listas."
     )
 
     df_completadas = obtener_tareas_completadas()
 
     if not df_completadas.empty and "Actividad" in df_completadas.columns:
-      # Filtrar filas que tengan contenido real en la columna Actividad
       df_completadas = df_completadas[df_completadas["Actividad"].str.strip() != ""]
 
       if not df_completadas.empty:
@@ -448,13 +449,13 @@ else:
           with c2:
             st.write(hora_fmt if hora_fmt else "--:--")
           with c3:
-            st.write(f"~~{titulo_act}~~")  # Texto tachado para completadas
+            st.write(f"~~{titulo_act}~~")
           with c4:
             st.markdown("🟢 **Completada**")
           st.divider()
       else:
         st.info(
-            "Aún no hay tareas marcadas como completadas en la hoja de datos."
+            "Aún no hay tareas marcadas como completadas."
         )
     else:
-      st.info("Aún no hay tareas marcadas como completadas en la hoja de datos.")
+      st.info("Aún no hay tareas marcadas como completadas.")
