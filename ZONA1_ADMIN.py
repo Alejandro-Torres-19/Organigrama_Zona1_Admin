@@ -95,7 +95,7 @@ else:
               ]
           )
       except gspread.exceptions.APIError:
-        time.sleep(1)  # Esperar 1 segundo si salta error de cuota
+        time.sleep(1)
     return pd.DataFrame(
         columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
     )
@@ -105,14 +105,13 @@ else:
   # CALLBACK DIRECTO PARA ACTUALIZACIÓN INSTANTÁNEA
   def completar_tarea_callback(fila_index, nuevo_estado=True):
     try:
-      # Número de fila real en Google Sheets (base 1 + encabezado)
       num_fila_sheets = int(fila_index) + 2
       valor_escribir = "Completada" if nuevo_estado else "Pendiente"
 
-      # Escribir directamente en la Columna 6 (F: Estado / Finalizada)
+      # Escribir en Columna 6 (F: Estado / Finalizada)
       sheet.update_cell(num_fila_sheets, 6, valor_escribir)
 
-      # Invalida el caché local para refrescar los datos en pantalla
+      # Invalida caché para refrescar
       st.cache_data.clear()
     except Exception as err:
       st.error(f"Error al escribir en Google Sheets: {err}")
@@ -233,133 +232,123 @@ else:
 
   st.markdown("---")
 
-  st.markdown(
-      """
-        <style>
-        .fc .fc-day-today {
-            background-color: transparent !important;
-        }
-        .fc-theme-standard .fc-scrollgrid {
-            background-color: transparent !important;
-        }
-        </style>
-        """,
-      unsafe_allow_html=True,
+  # SECCIÓN CALENDARIO SIEMPRE VISIBLE
+  st.subheader("📅 Vista Calendario")
+
+  eventos_calendario = []
+  if not df_actividades.empty:
+    for idx, row in df_actividades.iterrows():
+      is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
+      is_private = str(row.get("Privado", "false")).upper() == "TRUE"
+      val_est = (
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
+      )
+      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
+
+      titulo_display = str(row.get("Actividad", "Sin Nombre"))
+      if is_private:
+        titulo_display = f"🔒 {titulo_display}"
+      if is_finalizada:
+        titulo_display = f"✅ {titulo_display}"
+
+      color_evento = "#28a745" if is_finalizada else color_seleccionado
+
+      evento = {
+          "title": titulo_display,
+          "start": str(row.get("Inicio", "")),
+          "end": str(row.get("Fin", "")),
+          "allDay": is_all_day,
+          "backgroundColor": color_evento,
+          "borderColor": color_evento,
+          "textColor": "#FFFFFF",
+          "display": "block",
+      }
+      eventos_calendario.append(evento)
+
+  calendar_options = {
+      "headerToolbar": {
+          "left": "today prev,next",
+          "center": "title",
+          "right": "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+      },
+      "initialView": "dayGridMonth",
+      "displayEventTime": False,
+      "eventDisplay": "block",
+      "selectable": True,
+      "editable": False,
+  }
+
+  # Se asigna una key dinámica fija para evitar que se desmonte al navegar
+  calendar(
+      events=eventos_calendario,
+      options=calendar_options,
+      key="calendario_principal_fijo",
   )
 
-  tab_calendario, tab_registro = st.tabs(
-      ["📅 Vista Calendario", "📋 Lista de Tareas y Gestión"]
-  )
+  st.markdown("---")
 
-  # PESTAÑA 1: VISTA CALENDARIO
-  with tab_calendario:
-    eventos_calendario = []
+  # SECCIÓN PESTAÑA LISTA DE TAREAS Y GESTIÓN
+  st.subheader("📋 Lista de Tareas y Gestión")
 
-    if not df_actividades.empty:
-      for idx, row in df_actividades.iterrows():
-        is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
-        is_private = str(row.get("Privado", "false")).upper() == "TRUE"
-        val_est = (
-            str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
-        )
-        is_finalizada = val_est in ["COMPLETADA", "TRUE"]
+  if not df_actividades.empty:
+    for idx, row in df_actividades.iterrows():
+      val_est = (
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
+      )
+      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
+      inicio_raw = str(row.get("Inicio", ""))
+      titulo_act = str(row.get("Actividad", ""))
 
-        titulo_display = str(row.get("Actividad", "Sin Nombre"))
-        if is_private:
-          titulo_display = f"🔒 {titulo_display}"
+      if "T" in inicio_raw:
+        partes = inicio_raw.split("T")
+        try:
+          fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime(
+              "%d-%m-%Y"
+          )
+        except:
+          fecha_fmt = partes[0]
+        hora_fmt = partes[1][:5]
+      elif " " in inicio_raw:
+        partes = inicio_raw.split(" ")
+        try:
+          fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime(
+              "%d-%m-%Y"
+          )
+        except:
+          fecha_fmt = partes[0]
+        hora_fmt = partes[1][:5]
+      else:
+        try:
+          fecha_fmt = datetime.datetime.strptime(
+              inicio_raw, "%Y-%m-%d"
+          ).strftime("%d-%m-%Y")
+        except:
+          fecha_fmt = inicio_raw
+        hora_fmt = ""
+
+      c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
+
+      with c1:
+        st.write(f"**{fecha_fmt}**")
+      with c2:
+        st.write(hora_fmt if hora_fmt else "--:--")
+      with c3:
+        st.write(titulo_act)
+      with c4:
         if is_finalizada:
-          titulo_display = f"✅ {titulo_display}"
-
-        color_evento = "#28a745" if is_finalizada else color_seleccionado
-
-        evento = {
-            "title": titulo_display,
-            "start": str(row.get("Inicio", "")),
-            "end": str(row.get("Fin", "")),
-            "allDay": is_all_day,
-            "backgroundColor": color_evento,
-            "borderColor": color_evento,
-            "textColor": "#FFFFFF",
-            "display": "block",
-        }
-        eventos_calendario.append(evento)
-
-    calendar_options = {
-        "headerToolbar": {
-            "left": "today prev,next",
-            "center": "title",
-            "right": "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
-        },
-        "initialView": "dayGridMonth",
-        "displayEventTime": False,
-        "eventDisplay": "block",
-        "selectable": True,
-        "editable": False,
-    }
-
-    calendar(events=eventos_calendario, options=calendar_options)
-
-  # PESTAÑA 2: LISTA DE TAREAS Y GESTIÓN
-  with tab_registro:
-    if not df_actividades.empty:
-      for idx, row in df_actividades.iterrows():
-        val_est = (
-            str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
-        )
-        is_finalizada = val_est in ["COMPLETADA", "TRUE"]
-        inicio_raw = str(row.get("Inicio", ""))
-        titulo_act = str(row.get("Actividad", ""))
-
-        if "T" in inicio_raw:
-          partes = inicio_raw.split("T")
-          try:
-            fecha_fmt = datetime.datetime.strptime(
-                partes[0], "%Y-%m-%d"
-            ).strftime("%d-%m-%Y")
-          except:
-            fecha_fmt = partes[0]
-          hora_fmt = partes[1][:5]
-        elif " " in inicio_raw:
-          partes = inicio_raw.split(" ")
-          try:
-            fecha_fmt = datetime.datetime.strptime(
-                partes[0], "%Y-%m-%d"
-            ).strftime("%d-%m-%Y")
-          except:
-            fecha_fmt = partes[0]
-          hora_fmt = partes[1][:5]
+          st.markdown("🟢 **Completada**")
         else:
-          try:
-            fecha_fmt = datetime.datetime.strptime(
-                inicio_raw, "%Y-%m-%d"
-            ).strftime("%d-%m-%Y")
-          except:
-            fecha_fmt = inicio_raw
-          hora_fmt = ""
-
-        c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
-
-        with c1:
-          st.write(f"**{fecha_fmt}**")
-        with c2:
-          st.write(hora_fmt if hora_fmt else "--:--")
-        with c3:
-          st.write(titulo_act)
-        with c4:
-          if is_finalizada:
-            st.markdown("🟢 **Completada**")
-          else:
-            st.markdown("🟡 **Pendiente**")
-        with c5:
-          if is_finalizada:
-            st.markdown("🟣 **Finalizada**")
-          else:
-            st.button(
-                "☑️ Marcar Lista",
-                key=f"btn_tab_gestion_{idx}",
-                on_click=completar_tarea_callback,
-                args=(idx, True),
-            )
-        st.divider()
-    else:
-      st.info("No hay tareas registradas")
+          st.markdown("🟡 **Pendiente**")
+      with c5:
+        if is_finalizada:
+          st.markdown("🟣 **Finalizada**")
+        else:
+          st.button(
+              "☑️ Marcar Lista",
+              key=f"btn_tab_gestion_{idx}",
+              on_click=completar_tarea_callback,
+              args=(idx, True),
+          )
+      st.divider()
+  else:
+    st.info("No hay tareas registradas")
