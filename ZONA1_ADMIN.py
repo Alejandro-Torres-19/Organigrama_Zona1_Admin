@@ -71,7 +71,6 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  # DESACTIVAMOS EL TTL O LO DEJAMOS EN 0 PARA EVITAR DATOS OBSOLETOS EN CACHÉ
   @st.cache_data(ttl=0)
   def cargar_datos_hoja():
     rows = sheet.get_all_values()
@@ -94,26 +93,17 @@ else:
           ]
       )
 
-  # FUNCIÓN CONVERTIENDO EXPLÍCITAMENTE A NÚMEROS ENTEROS (INT)
+  # FUNCIÓN CORREGIDA CON INDENTACIÓN Y VARIABLES CORRECTAS
   def actualizar_estado_por_id(id_buscar, nuevo_estado):
-      try:
-        val_celda = sheet.find(str(id_buscar).strip())
-        if val_celda:
-          num_fila = int(val_celda.row)
-          num_columna = 8  # Columna H (Finalizada)
+    try:
+      val_celda = sheet.find(str(id_buscar).strip())
+      if val_celda:
+        num_fila = int(val_celda.row)
+        num_columna = 8  # Columna H = Columna 8 (Finalizada)
 
-          texto_estado = "TRUE" if nuevo_estado else "FALSE"
-          # CORREGIDO: Usar texto_estado en lugar de texto_texto
-          sheet.update_cell(num_fila, num_columna, texto_estado)
+        texto_estado = "TRUE" if nuevo_estado else "FALSE"
+        sheet.update_cell(num_fila, num_columna, texto_estado)
 
-          st.cache_data.clear()
-          return True
-        else:
-          st.error(f"No se encontró la ID {id_buscar} en el documento.")
-          return False
-      except Exception as err:
-        st.error(f"Error técnico de gspread: {err}")
-        return False
         st.cache_data.clear()
         return True
       else:
