@@ -23,7 +23,7 @@ def verificar_password():
   if st.session_state.get("Ingrese Contraseña") == PASWORD_CORRECTA:
     st.session_state.autenticado = True
     if "Ingrese Contraseña" in st.session_state:
-      del st.session_state["Ingrese Contraseña"]  # BORRAR DATOS CONTRASEÑA
+      del st.session_state["Ingrese Contraseña"]
   else:
     st.session_state.autenticado = False
     st.error("Contraseña incorrecta, intente nuevamente")
@@ -58,7 +58,6 @@ if not st.session_state.autenticado:
 
 # PANTALLA PRINCIPAL DESPUÉS DE LOGIN EXITOSO
 else:
-  # BOTON SALIR BARRA LATERAL
   st.sidebar.button(
       "🚪 Cerrar Sesión",
       on_click=lambda: st.session_state.update(autenticado=False),
@@ -66,15 +65,14 @@ else:
 
   st.title("👑 ORGANIGRAMA ZONA 1 (Admin) 👑")
 
-  # CONECTAR A HOJA DE CÁLCULO
   try:
     sheet = conectar_google_sheets()
   except Exception as e:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  # DEFINICIÓN DE LA FUNCIÓN DE LECTURA CON CACHÉ
-  @st.cache_data(ttl=2)
+  # DESACTIVAMOS EL TTL O LO DEJAMOS EN 0 PARA EVITAR DATOS OBSOLETOS EN CACHÉ
+  @st.cache_data(ttl=0)
   def cargar_datos_hoja():
     rows = sheet.get_all_values()
     if len(rows) > 1:
@@ -95,6 +93,27 @@ else:
               "Finalizada",
           ]
       )
+
+  # FUNCIÓN CONVERTIENDO EXPLÍCITAMENTE A NÚMEROS ENTEROS (INT)
+  def actualizar_estado_por_id(id_buscar, nuevo_estado):
+    try:
+      val_celda = sheet.find(str(id_buscar).strip())
+      if val_celda:
+        # Fila y Columna deben ser enteros
+        num_fila = int(val_celda.row)
+        num_columna = 8  # Columna H = Columna 8 (Finalizada)
+
+        texto_estado = "TRUE" if nuevo_estado else "FALSE"
+        sheet.update_cell(num_fila, num_columna, texto_texto)
+
+        st.cache_data.clear()
+        return True
+      else:
+        st.error(f"No se encontró la ID {id_buscar} en el documento.")
+        return False
+    except Exception as err:
+      st.error(f"Error técnico de gspread: {err}")
+      return False
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -138,7 +157,6 @@ else:
       "🔒 Actividad privada (Solo Admin)", value=False
   )
 
-  # PALETA COLORES ACTIVIDADES
   PALETA_COLORES = {
       "🔵 Azul (Predeterminado)": "#3788d8",
       "🔴 Rojo (Urgente)": "#dc3545",
@@ -202,18 +220,8 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{id_actual_hoy}"
         )
         if checked != is_finalizada:
-          try:
-            cell_id = sheet.find(id_actual_hoy)
-            col_finalizada = sheet.find("Finalizada").col
-
-            if cell_id:
-              sheet.update_cell(
-                  cell_id.row, col_finalizada, "TRUE" if checked else "FALSE"
-              )
-              st.cache_data.clear()
-              st.rerun()
-          except Exception as e:
-            st.error(f"Error al actualizar en Google Sheets: {e}")
+          if actualizar_estado_por_id(id_actual_hoy, checked):
+            st.rerun()
 
       with col_info:
         candado = "🔒 " if es_priv else ""
@@ -226,7 +234,6 @@ else:
 
   st.markdown("---")
 
-  # ESTILOS CSS PARA QUITAR EL SOMBREADO
   st.markdown(
       """
         <style>
@@ -241,12 +248,10 @@ else:
       unsafe_allow_html=True,
   )
 
-  # PESTAÑAS
   tab_calendario, tab_registro = st.tabs(
       ["📅 Vista Calendario", "📋 Lista de Tareas y Gestión"]
   )
 
-  # PESTAÑA 1: VISTA DE CALENDARIO
   with tab_calendario:
     eventos_calendario = []
 
@@ -346,18 +351,8 @@ else:
             st.markdown("🟣 **Finalizada**")
           else:
             if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{id_actual}"):
-              try:
-                cell_id = sheet.find(id_actual)
-                col_finalizada = sheet.find("Finalizada").col
-
-                if cell_id:
-                  sheet.update_cell(cell_id.row, col_finalizada, "TRUE")
-                  st.cache_data.clear()
-                  st.rerun()
-                else:
-                  st.error(f"No se encontró el ID '{id_actual}' en la hoja.")
-              except Exception as err:
-                st.error(f"Error al actualizar la hoja: {err}")
+              if actualizar_estado_por_id(id_actual, True):
+                st.rerun()
         st.divider()
     else:
       st.info("No hay tareas registradas")
