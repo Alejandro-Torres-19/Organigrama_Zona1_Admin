@@ -256,68 +256,76 @@ else:
         # Renderizar SIEMPRE el componente del calendario (incluso con la lista 'eventos_calendario' vacía)
         calendar(events=eventos_calendario, options=calendar_options)
 
-    # PESTAÑA 2: LISTA DE TAREAS Y GESTIÓN
-    with tab_registro:
-        if not df_actividades.empty:
-            for idx, row in df_actividades.iterrows():
-                is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
-                inicio_raw = str(row.get("Inicio", ""))
+   # PESTAÑA 2: LISTA DE TAREAS Y GESTIÓN
+with tab_registro:
+    if not df_actividades.empty:
+        # Cargar todas las filas físicas para buscar por ID
+        todas_las_filas = sheet.get_all_values()
 
-                # Extraer Fecha y Hora
-                if "T" in inicio_raw:
-                    partes = inicio_raw.split("T")
-                    try:
-                        fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime("%d-%m-%Y")
-                    except:
-                        fecha_fmt = partes[0]
-                    hora_fmt = partes[1][:5]
-                elif " " in inicio_raw:
-                    partes = inicio_raw.split(" ")
-                    try:
-                        fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime("%d-%m-%Y")
-                    except:
-                        fecha_fmt = partes[0]
-                    hora_fmt = partes[1][:5]
+        for idx, row in df_actividades.iterrows():
+            is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
+            inicio_raw = str(row.get("Inicio", ""))
+            id_actual = str(row.get("ID", ""))
+
+            # Extraer Fecha y Hora
+            if "T" in inicio_raw:
+                partes = inicio_raw.split("T")
+                try:
+                    fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime("%d-%m-%Y")
+                except:
+                    fecha_fmt = partes[0]
+                hora_fmt = partes[1][:5]
+            elif " " in inicio_raw:
+                partes = inicio_raw.split(" ")
+                try:
+                    fecha_fmt = datetime.datetime.strptime(partes[0], "%Y-%m-%d").strftime("%d-%m-%Y")
+                except:
+                    fecha_fmt = partes[0]
+                hora_fmt = partes[1][:5]
+            else:
+                try:
+                    fecha_fmt = datetime.datetime.strptime(inicio_raw, "%Y-%m-%d").strftime("%d-%m-%Y")
+                except:
+                    fecha_fmt = inicio_raw
+                hora_fmt = ""
+
+            c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
+
+            with c1:
+                st.write(f"**{fecha_fmt}**")
+            with c2:
+                st.write(hora_fmt if hora_fmt else "--:--")
+            with c3:
+                st.write(row.get("Actividad", ""))
+            with c4:
+                if is_finalizada:
+                    st.markdown("🟢 **Completada**")
                 else:
-                    try:
-                        fecha_fmt = datetime.datetime.strptime(inicio_raw, "%Y-%m-%d").strftime("%d-%m-%Y")
-                    except:
-                        fecha_fmt = inicio_raw
-                    hora_fmt = ""
+                    st.markdown("🟡 **Pendiente**")
+            with c5:
+                if is_finalizada:
+                    st.markdown("🟣 **Finalizada**")
+                else:
+                    if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{id_actual}"):
+                        # Buscar la fila física en Google Sheets haciendo coincidir el ID
+                        fila_real = None
+                        for num_fila, fila in enumerate(todas_las_filas, start=1):
+                            if len(fila) > 0 and str(fila[0]).strip() == id_actual:
+                                fila_real = num_fila
+                                break
 
-                c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
-
-                with c1:
-                    st.write(f"**{fecha_fmt}**")
-                with c2:
-                    st.write(hora_fmt if hora_fmt else "--:--")
-                with c3:
-                    st.write(row.get("Actividad", ""))
-                with c4:
-                    if is_finalizada:
-                        st.markdown("🟢 **Completada**")
-                    else:
-                        st.markdown("🟡 **Pendiente**")
-                with c5:
-                    if is_finalizada:
-                        st.markdown("🟣 **Finalizada**")
-                    else:
-                        if st.button("☑️ Marcar Lista", key=f"btn_tab_{idx}"):
-                            sheet.update(range_name=f"H{idx + 2}", values=[["TRUE"]])
+                        if fila_real:
+                            # Actualizar la columna H (Finalizada) en la fila correcta
+                            sheet.update(range_name=f"H{fila_real}", values=[["TRUE"]])
+                            
+                            # Limpiar caché y recargar interfaz de inmediato
                             cargar_datos_hoja.clear()
                             st.rerun()
-                st.divider()
-        else:
-            st.info("No hay tareas registradas")
-
-
-
-
-
-
-
-
-
+                        else:
+                            st.error("No se encontró el ID de la actividad en la hoja.")
+            st.divider()
+    else:
+        st.info("No hay tareas registradas")
 
 
 
