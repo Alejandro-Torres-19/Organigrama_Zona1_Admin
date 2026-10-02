@@ -9,7 +9,7 @@ from streamlit_calendar import calendar
 
 # CONFIGURACIÓN INICIAL PÁGINA
 st.set_page_config(
-    page_title="Organigrama Zona 1 (Admin)", page_icon="🔒", layout="wide"
+    page_title="CRONOGRAMA Zona 1 (Admin)", page_icon="🔒", layout="wide"
 )
 
 # DEFINIR CONTRASEÑA CORRECTA
@@ -64,7 +64,7 @@ else:
       on_click=lambda: st.session_state.update(autenticado=False),
   )
 
-  st.title("👑 ORGANIGRAMA ZONA 1 (Admin) 👑")
+  st.title("👑 CRONOGRAMA ZONA 1 (Admin) 👑")
 
   try:
     sheet = conectar_google_sheets()
