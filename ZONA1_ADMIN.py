@@ -69,7 +69,7 @@ else:
         st.stop()
 
     # DEFINICIÓN DE LA FUNCIÓN DE LECTURA CON CACHÉ
-    @st.cache_data(ttl=60)  # Mantiene la información en memoria 60 segundos
+    @st.cache_data(ttl=5)  # Mantiene la información en memoria 60 segundos
     def cargar_datos_hoja():
         rows = sheet.get_all_values()
         if len(rows) > 1:
