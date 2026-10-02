@@ -95,48 +95,20 @@ else:
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN DE MARCADO SIN ID (BUSCA POR ACTIVIDAD E INICIO O ÍNDICE DIRECTO)
-  def cambiar_estado_actividad(actividad_nombre, inicio_fecha, nuevo_estado):
+  # FUNCIÓN PARA CAMBIAR ESTADO DIRECTO POR FILA (SIN BÚSQUEDA COMPLICADA)
+  def cambiar_estado_por_indice(indice_df, nuevo_estado):
     try:
-      todas_las_filas = sheet.get_all_values()
-      fila_encontrada = None
+      # La fila en Google Sheets es el índice de Pandas + 2 (1 por encabezado + 1 por índice base 1)
+      num_fila_sheets = indice_df + 2
 
-      # Recorremos las filas omitiendo los encabezados (fila 1)
-      for num_fila, fila in enumerate(todas_las_filas[1:], start=2):
-        if len(fila) >= 2:
-          # Si coincide el nombre de la actividad y la fecha de inicio
-          if (
-              str(fila[0]).strip().lower()
-              == str(actividad_nombre).strip().lower()
-              and str(fila[1]).strip() == str(inicio_fecha).strip()
-          ):
-            fila_encontrada = num_fila
-            break
+      # Valor booleano como texto
+      val_str = "TRUE" if nuevo_estado else "FALSE"
 
-      # Si no coincide la fecha pero sí el nombre exacto de la actividad
-      if not fila_encontrada:
-        for num_fila, fila in enumerate(todas_las_filas[1:], start=2):
-          if len(fila) >= 1:
-            if (
-                str(fila[0]).strip().lower()
-                == str(actividad_nombre).strip().lower()
-            ):
-              fila_encontrada = num_fila
-              break
+      # Columna 7 = Columna G (Finalizada)
+      sheet.update_cell(num_fila_sheets, 7, val_str)
 
-      if fila_encontrada:
-        # Columna G (columna 7) es Finalizada cuando eliminamos ID
-        val_str = "TRUE" if nuevo_estado else "FALSE"
-        sheet.update_cell(fila_encontrada, 7, val_str)
-
-        st.cache_data.clear()
-        return True
-      else:
-        st.error(
-            f"No se encontró la actividad '{actividad_nombre}' en la hoja."
-        )
-        return False
-
+      st.cache_data.clear()
+      return True
     except Exception as err:
       st.error(f"Error actualizando la hoja: {err}")
       return False
@@ -200,7 +172,6 @@ else:
     if not actividad:
       st.sidebar.warning("Por favor ingresa un título para la actividad")
     else:
-      # Guardamos directamente sin columna ID
       nueva_fila = [
           actividad,
           start_str,
@@ -236,7 +207,6 @@ else:
       ]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = row.get("Actividad", "Sin nombre")
-      inicio_fecha = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
@@ -245,7 +215,7 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_actividad(titulo, inicio_fecha, checked):
+          if cambiar_estado_por_indice(idx, checked):
             st.rerun()
 
       with col_info:
@@ -295,6 +265,7 @@ else:
         if is_finalizada:
           titulo_display = f"✅ {titulo_display}"
 
+        # Verde si está completada, si no mantiene el color asignado
         color_actual = (
             "#28a745" if is_finalizada else str(row.get("Color", "#3788d8"))
         )
@@ -381,8 +352,8 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
-              if cambiar_estado_actividad(titulo_act, inicio_raw, True):
+            if st.button("☑️️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
+              if cambiar_estado_por_indice(idx, True):
                 st.rerun()
         st.divider()
     else:
