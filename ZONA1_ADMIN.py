@@ -71,7 +71,7 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  @st.cache_data(ttl=0)
+  @st.cache_data(ttl=1)
   def cargar_datos_hoja():
     rows = sheet.get_all_values()
     if len(rows) > 1:
@@ -82,7 +82,6 @@ else:
     else:
       return pd.DataFrame(
           columns=[
-              "ID",
               "Actividad",
               "Inicio",
               "Fin",
@@ -93,24 +92,53 @@ else:
           ]
       )
 
-  # FUNCIÓN CORREGIDA CON INDENTACIÓN Y VARIABLES CORRECTAS
-  def actualizar_estado_por_id(id_buscar, nuevo_estado):
-    try:
-      val_celda = sheet.find(str(id_buscar).strip())
-      if val_celda:
-        num_fila = int(val_celda.row)
-        num_columna = 8  # Columna H = Columna 8 (Finalizada)
+  # CARGAR DATOS
+  df_actividades = cargar_datos_hoja()
 
-        texto_estado = "TRUE" if nuevo_estado else "FALSE"
-        sheet.update_cell(num_fila, num_columna, texto_estado)
+  # FUNCIÓN DE MARCADO SIN ID (BUSCA POR ACTIVIDAD E INICIO O ÍNDICE DIRECTO)
+  def cambiar_estado_actividad(actividad_nombre, inicio_fecha, nuevo_estado):
+    try:
+      todas_las_filas = sheet.get_all_values()
+      fila_encontrada = None
+
+      # Recorremos las filas omitiendo los encabezados (fila 1)
+      for num_fila, fila in enumerate(todas_las_filas[1:], start=2):
+        if len(fila) >= 2:
+          # Si coincide el nombre de la actividad y la fecha de inicio
+          if (
+              str(fila[0]).strip().lower()
+              == str(actividad_nombre).strip().lower()
+              and str(fila[1]).strip() == str(inicio_fecha).strip()
+          ):
+            fila_encontrada = num_fila
+            break
+
+      # Si no coincide la fecha pero sí el nombre exacto de la actividad
+      if not fila_encontrada:
+        for num_fila, fila in enumerate(todas_las_filas[1:], start=2):
+          if len(fila) >= 1:
+            if (
+                str(fila[0]).strip().lower()
+                == str(actividad_nombre).strip().lower()
+            ):
+              fila_encontrada = num_fila
+              break
+
+      if fila_encontrada:
+        # Columna G (columna 7) es Finalizada cuando eliminamos ID
+        val_str = "TRUE" if nuevo_estado else "FALSE"
+        sheet.update_cell(fila_encontrada, 7, val_str)
 
         st.cache_data.clear()
         return True
       else:
-        st.error(f"No se encontró la ID {id_buscar} en el documento.")
+        st.error(
+            f"No se encontró la actividad '{actividad_nombre}' en la hoja."
+        )
         return False
+
     except Exception as err:
-      st.error(f"Error técnico de gspread: {err}")
+      st.error(f"Error actualizando la hoja: {err}")
       return False
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
@@ -172,9 +200,8 @@ else:
     if not actividad:
       st.sidebar.warning("Por favor ingresa un título para la actividad")
     else:
-      id_actividad = str(int(datetime.datetime.now().timestamp()))
+      # Guardamos directamente sin columna ID
       nueva_fila = [
-          id_actividad,
           actividad,
           start_str,
           end_str,
@@ -188,9 +215,6 @@ else:
       st.cache_data.clear()
       st.sidebar.success("✅ Actividad guardada con éxito")
       st.rerun()
-
-  # CARGAR DATOS
-  df_actividades = cargar_datos_hoja()
 
   # SECCIÓN PENDIENTES HOY
   st.subheader("📌 Pendientes de Hoy")
@@ -206,19 +230,22 @@ else:
 
   if actividades_hoy:
     for idx, row in actividades_hoy:
-      is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
+      is_finalizada = str(row.get("Finalizada", "false")).upper() in [
+          "TRUE",
+          "COMPLETADA",
+      ]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = row.get("Actividad", "Sin nombre")
-      id_actual_hoy = str(row.get("ID", "")).strip()
+      inicio_fecha = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
       with col_check:
         checked = st.checkbox(
-            "", value=is_finalizada, key=f"check_hoy_{id_actual_hoy}"
+            "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if actualizar_estado_por_id(id_actual_hoy, checked):
+          if cambiar_estado_actividad(titulo, inicio_fecha, checked):
             st.rerun()
 
       with col_info:
@@ -257,7 +284,10 @@ else:
       for idx, row in df_actividades.iterrows():
         is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
-        is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
+        is_finalizada = str(row.get("Finalizada", "false")).upper() in [
+            "TRUE",
+            "COMPLETADA",
+        ]
 
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
         if is_private:
@@ -300,9 +330,12 @@ else:
   with tab_registro:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
-        is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
+        is_finalizada = str(row.get("Finalizada", "false")).upper() in [
+            "TRUE",
+            "COMPLETADA",
+        ]
         inicio_raw = str(row.get("Inicio", ""))
-        id_actual = str(row.get("ID", "")).strip()
+        titulo_act = str(row.get("Actividad", ""))
 
         if "T" in inicio_raw:
           partes = inicio_raw.split("T")
@@ -338,7 +371,7 @@ else:
         with c2:
           st.write(hora_fmt if hora_fmt else "--:--")
         with c3:
-          st.write(row.get("Actividad", ""))
+          st.write(titulo_act)
         with c4:
           if is_finalizada:
             st.markdown("🟢 **Completada**")
@@ -348,8 +381,8 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{id_actual}"):
-              if actualizar_estado_por_id(id_actual, True):
+            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
+              if cambiar_estado_actividad(titulo_act, inicio_raw, True):
                 st.rerun()
         st.divider()
     else:
