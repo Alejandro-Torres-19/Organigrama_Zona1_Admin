@@ -94,19 +94,33 @@ else:
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN BÚSQUEDA Y ACTUALIZACIÓN DIRECTA
-  def cambiar_estado_actividad(indice_df, nuevo_estado):
+  # FUNCIÓN BÚSQUEDA DINÁMICA Y ACTUALIZACIÓN DIRECTA
+  def cambiar_estado_actividad(actividad_nombre, nuevo_estado):
     try:
-      # Fila en Sheets = índice en DataFrame + 2 (1 por encabezado, base 1)
-      num_fila_sheets = indice_df + 2
+      # Obtenemos todos los nombres de la Columna A (Actividades)
+      col_actividades = sheet.col_values(1)
 
-      val_str = "TRUE" if nuevo_estado else "FALSE"
+      fila_encontrada = None
+      target = str(actividad_nombre).strip().lower()
 
-      # Columna F (Columna 6 en Google Sheets: Finalizada)
-      sheet.update_cell(num_fila_sheets, 6, val_str)
+      # Buscamos la fila exacta en la hoja
+      for idx, val in enumerate(col_actividades):
+        if str(val).strip().lower() == target:
+          fila_encontrada = idx + 1  # Google Sheets usa índice base 1
+          break
 
-      st.cache_data.clear()
-      return True
+      if fila_encontrada:
+        val_str = "TRUE" if nuevo_estado else "FALSE"
+        # Columna 6 = Columna F (Finalizada)
+        sheet.update_cell(fila_encontrada, 6, val_str)
+        st.cache_data.clear()
+        return True
+      else:
+        st.error(
+            f"No se encontró la actividad '{actividad_nombre}' en la hoja."
+        )
+        return False
+
     except Exception as err:
       st.error(f"Error actualizando la hoja: {err}")
       return False
@@ -199,7 +213,7 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_actividad(idx, checked):
+          if cambiar_estado_actividad(titulo, checked):
             st.rerun()
 
       with col_info:
@@ -249,7 +263,6 @@ else:
         if is_finalizada:
           titulo_display = f"✅ {titulo_display}"
 
-        # Color verde para completadas, azul estándar para pendientes
         color_evento = "#28a745" if is_finalizada else "#3788d8"
 
         evento = {
@@ -335,7 +348,7 @@ else:
             st.markdown("🟣 **Finalizada**")
           else:
             if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
-              if cambiar_estado_actividad(idx, True):
+              if cambiar_estado_actividad(titulo_act, True):
                 st.rerun()
         st.divider()
     else:
