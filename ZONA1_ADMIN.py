@@ -6,32 +6,21 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import streamlit as st
 from streamlit_calendar import calendar
+import streamlit.components.v1 as components
 
 # CONFIGURACIÓN INICIAL PÁGINA
 st.set_page_config(
     page_title="CRONOGRAMA Zona 1 (Admin)", page_icon="🔒", layout="wide"
 )
 
-# ESTILOS CSS ACTUALIZADOS PARA PERMITIR MULTILÍNEA EN FULLCALENDAR
+# SCRIPT DE JAVASCRIPT / CSS PARA FORZAR EL SALTO DE LÍNEA EN EL CALENDARIO INTERNO
 st.markdown(
     """
     <style>
-    /* Forzar que los títulos de los eventos y contenedores hagan salto de línea */
-    .fc-event, .fc-event-main, .fc-event-title, .fc-daygrid-event {
+    /* Estilos generales de apoyo por si el componente los hereda */
+    .fc-event-title {
         white-space: normal !important;
         overflow: visible !important;
-        text-overflow: initial !important;
-        height: auto !important;
-    }
-    .fc-daygrid-event-harness {
-        margin-bottom: 2px !important;
-    }
-    /* Asegurar espacio vertical automático en las celdas del mes */
-    .fc-daygrid-day-frame {
-        min-height: 130px !important;
-    }
-    .fc-daygrid-day-events {
-        max-height: none !important;
     }
     </style>
     """,
@@ -309,10 +298,35 @@ else:
       "editable": False,
   }
 
+  # Renderizado del calendario
   calendar(
       events=eventos_calendario,
       options=calendar_options,
       key="calendario_principal_fijo",
+  )
+
+  # INYECCIÓN DE JS PARA FORZAR EL ESTILO MULTILÍNEA EN EL DOM DEL CALENDARIO
+  components.html(
+      """
+    <script>
+    const observer = new MutationObserver(() => {
+        const doc = window.parent.document;
+        const events = doc.querySelectorAll('.fc-event, .fc-event-main, .fc-event-title, .fc-daygrid-event');
+        events.forEach(el => {
+            el.style.whiteSpace = 'normal';
+            el.style.overflow = 'visible';
+            el.style.textOverflow = 'initial';
+            el.style.height = 'auto';
+        });
+        const frames = doc.querySelectorAll('.fc-daygrid-day-frame');
+        frames.forEach(f => {
+            f.style.minHeight = '130px';
+        });
+    });
+    observer.observe(window.parent.document.body, { childList: true, subtree: true });
+    </script>
+    """,
+      height=0,
   )
 
   st.markdown("---")
