@@ -176,55 +176,57 @@ else:
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # SECCIÓN PENDIENTES HOY
-  st.subheader("📌 Pendientes de Hoy")
+ # SECCIÓN PENDIENTES HOY
+    st.subheader("📌 Pendientes de Hoy")
 
-  hoy_iso = datetime.date.today().strftime("%Y-%m-%d")
+    hoy_iso = datetime.date.today().strftime("%Y-%m-%d")
 
-  actividades_hoy = []
-  if not df_actividades.empty:
-    for idx, row in df_actividades.iterrows():
-      inicio_val = str(row.get("Inicio", ""))
-      if inicio_val.startswith(hoy_iso):
-        actividades_hoy.append((idx, row))
+    actividades_hoy = []
+    if not df_actividades.empty:
+      for idx, row in df_actividades.iterrows():
+        inicio_val = str(row.get("Inicio", ""))
+        if inicio_val.startswith(hoy_iso):
+          actividades_hoy.append((idx, row))
 
-  if actividades_hoy:
-    todas_las_filas_hoy = sheet.get_all_values()
-    for idx, row in actividades_hoy:
-      is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
-      es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
-      titulo = row.get("Actividad", "Sin nombre")
-      id_actual_hoy = str(row.get("ID", ""))
+    if actividades_hoy:
+      for idx, row in actividades_hoy:
+        is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
+        es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
+        titulo = row.get("Actividad", "Sin nombre")
+        id_actual_hoy = str(row.get("ID", "")).strip()
 
-      col_check, col_info = st.columns([0.08, 0.92])
+        col_check, col_info = st.columns([0.08, 0.92])
 
-      with col_check:
-        checked = st.checkbox(
-            "", value=is_finalizada, key=f"check_hoy_{id_actual_hoy}"
-        )
-        if checked != is_finalizada:
-          fila_real_hoy = None
-          for num_f, f_data in enumerate(todas_las_filas_hoy, start=1):
-            if len(f_data) > 0 and str(f_data[0]).strip() == id_actual_hoy:
-              fila_real_hoy = num_f
-              break
+        with col_check:
+          checked = st.checkbox(
+              "", value=is_finalizada, key=f"check_hoy_{id_actual_hoy}"
+          )
+          if checked != is_finalizada:
+            try:
+              # Buscar directamente la celda del ID en la columna A
+              cell_id = sheet.find(id_actual_hoy)
+              # Buscar la columna donde está el encabezado "Finalizada"
+              col_finalizada = sheet.find("Finalizada").col
 
-          if fila_real_hoy:
-            # ACTUALIZAR MEDIANTE NUMERO DE FILA Y COLUMNA DIRECTA (Columna 8 = H)
-            sheet.update_cell(
-                fila_real_hoy, 8, "TRUE" if checked else "FALSE"
-            )
-            st.cache_data.clear()
-            st.rerun()
+              if cell_id:
+                sheet.update_cell(
+                    cell_id.row,
+                    col_finalizada,
+                    "TRUE" if checked else "FALSE",
+                )
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+              st.error(f"Error al actualizar en Google Sheets: {e}")
 
-      with col_info:
-        candado = "🔒 " if es_priv else ""
-        if checked:
-          st.markdown(f"~~{candado}**{titulo}**~~ (🟢 *Completada*)")
-        else:
-          st.markdown(f"🟡 **{candado}{titulo}** *(Pendiente)*")
-  else:
-    st.info("🎉 ¡No hay actividades pendientes para hoy!")
+        with col_info:
+          candado = "🔒 " if es_priv else ""
+          if checked:
+            st.markdown(f"~~{candado}**{titulo}**~~ (🟢 *Completada*)")
+          else:
+            st.markdown(f"🟡 **{candado}{titulo}** *(Pendiente)*")
+    else:
+      st.info("🎉 ¡No hay actividades pendientes para hoy!")
 
   st.markdown("---")
 
@@ -296,78 +298,79 @@ else:
     calendar(events=eventos_calendario, options=calendar_options)
 
   # PESTAÑA 2: LISTA DE TAREAS Y GESTIÓN
-  with tab_registro:
-    if not df_actividades.empty:
-      todas_las_filas = sheet.get_all_values()
+    with tab_registro:
+      if not df_actividades.empty:
+        for idx, row in df_actividades.iterrows():
+          is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
+          inicio_raw = str(row.get("Inicio", ""))
+          id_actual = str(row.get("ID", "")).strip()
 
-      for idx, row in df_actividades.iterrows():
-        is_finalizada = str(row.get("Finalizada", "false")).upper() == "TRUE"
-        inicio_raw = str(row.get("Inicio", ""))
-        id_actual = str(row.get("ID", ""))
-
-        if "T" in inicio_raw:
-          partes = inicio_raw.split("T")
-          try:
-            fecha_fmt = datetime.datetime.strptime(
-                partes[0], "%Y-%m-%d"
-            ).strftime("%d-%m-%Y")
-          except:
-            fecha_fmt = partes[0]
-          hora_fmt = partes[1][:5]
-        elif " " in inicio_raw:
-          partes = inicio_raw.split(" ")
-          try:
-            fecha_fmt = datetime.datetime.strptime(
-                partes[0], "%Y-%m-%d"
-            ).strftime("%d-%m-%Y")
-          except:
-            fecha_fmt = partes[0]
-          hora_fmt = partes[1][:5]
-        else:
-          try:
-            fecha_fmt = datetime.datetime.strptime(
-                inicio_raw, "%Y-%m-%d"
-            ).strftime("%d-%m-%Y")
-          except:
-            fecha_fmt = inicio_raw
-          hora_fmt = ""
-
-        c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
-
-        with c1:
-          st.write(f"**{fecha_fmt}**")
-        with c2:
-          st.write(hora_fmt if hora_fmt else "--:--")
-        with c3:
-          st.write(row.get("Actividad", ""))
-        with c4:
-          if is_finalizada:
-            st.markdown("🟢 **Completada**")
+          if "T" in inicio_raw:
+            partes = inicio_raw.split("T")
+            try:
+              fecha_fmt = datetime.datetime.strptime(
+                  partes[0], "%Y-%m-%d"
+              ).strftime("%d-%m-%Y")
+            except:
+              fecha_fmt = partes[0]
+            hora_fmt = partes[1][:5]
+          elif " " in inicio_raw:
+            partes = inicio_raw.split(" ")
+            try:
+              fecha_fmt = datetime.datetime.strptime(
+                  partes[0], "%Y-%m-%d"
+              ).strftime("%d-%m-%Y")
+            except:
+              fecha_fmt = partes[0]
+            hora_fmt = partes[1][:5]
           else:
-            st.markdown("🟡 **Pendiente**")
-        with c5:
-          if is_finalizada:
-            st.markdown("🟣 **Finalizada**")
-          else:
-            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{id_actual}"):
-              fila_real = None
-              for num_fila, fila in enumerate(todas_las_filas, start=1):
-                if len(fila) > 0 and str(fila[0]).strip() == id_actual:
-                  fila_real = num_fila
-                  break
+            try:
+              fecha_fmt = datetime.datetime.strptime(
+                  inicio_raw, "%Y-%m-%d"
+              ).strftime("%d-%m-%Y")
+            except:
+              fecha_fmt = inicio_raw
+            hora_fmt = ""
 
-              if fila_real:
-                # SE USA UPDATE_CELL (Fila exactas, Columna 8 = H)
-                sheet.update_cell(fila_real, 8, "TRUE")
+          c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
 
-                # LIMPIAR CACHÉ GENERAL DE STREAMLIT Y FORZAR RERUN
-                st.cache_data.clear()
-                st.rerun()
-              else:
-                st.error("No se encontró el ID de la actividad en la hoja.")
-        st.divider()
-    else:
-      st.info("No hay tareas registradas")
+          with c1:
+            st.write(f"**{fecha_fmt}**")
+          with c2:
+            st.write(hora_fmt if hora_fmt else "--:--")
+          with c3:
+            st.write(row.get("Actividad", ""))
+          with c4:
+            if is_finalizada:
+              st.markdown("🟢 **Completada**")
+            else:
+              st.markdown("🟡 **Pendiente**")
+          with c5:
+            if is_finalizada:
+              st.markdown("🟣 **Finalizada**")
+            else:
+              if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{id_actual}"):
+                try:
+                  # Busca exactamente la celda que contiene el ID
+                  cell_id = sheet.find(id_actual)
+                  # Busca el número de columna de "Finalizada"
+                  col_finalizada = sheet.find("Finalizada").col
+
+                  if cell_id:
+                    # Modifica la celda exacta en Google Sheets
+                    sheet.update_cell(cell_id.row, col_finalizada, "TRUE")
+
+                    # Limpia la memoria de Streamlit y fuerza la recarga de datos reales
+                    st.cache_data.clear()
+                    st.success("¡Estatus actualizado correctamente!")
+                    st.rerun()
+                  else:
+                    st.error(f"No se encontró el ID '{id_actual}' en la hoja.")
+                except Exception as err:
+                  st.error(f"Error al conectar con la hoja: {err}")
+          st.divider()
+      else:
+        st.info("No hay tareas registradas")
 
 
 
