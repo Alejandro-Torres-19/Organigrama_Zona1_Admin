@@ -72,9 +72,8 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-
-  # OBTENER DATOS CON PROTECCIÓN Y SIN CACHÉ RETARDADO
-  @st.cache_data(ttl=1)
+  # OBTENER DATOS CON CACHÉ Y PROTECCIÓN CONTRA CUOTAS (TTL=2)
+  @st.cache_data(ttl=2)
   def obtener_datos_actualizados():
     for intento in range(3):
       try:
@@ -101,52 +100,21 @@ else:
         columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
     )
 
-
   df_actividades = obtener_datos_actualizados()
 
-
-  # FUNCIÓN BLINDADA DE BÚSQUEDA Y ACTUALIZACIÓN POR TEXTO Y FECHA
-  def completar_tarea_por_datos(actividad_nom, inicio_val, nuevo_estado=True):
+  # CALLBACK DIRECTO PARA ACTUALIZACIÓN INSTANTÁNEA
+  def completar_tarea_callback(fila_index, nuevo_estado=True):
     try:
-      filas_reales = sheet.get_all_values()
-      fila_encontrada = None
+      num_fila_sheets = int(fila_index) + 2
+      valor_escribir = "Completada" if nuevo_estado else "Pendiente"
 
-      target_nombre = str(actividad_nom).strip().lower()
-      target_inicio = str(inicio_val).strip().lower()
+      # Escribir en Columna 6 (F: Estado / Finalizada)
+      sheet.update_cell(num_fila_sheets, 6, valor_escribir)
 
-      # 1. Búsqueda exacta combinando Nombre y Fecha de Inicio
-      for num_fila, fila in enumerate(filas_reales[1:], start=2):
-        if len(fila) >= 2:
-          nom_sheet = str(fila[0]).strip().lower()
-          ini_sheet = str(fila[1]).strip().lower()
-          if nom_sheet == target_nombre and ini_sheet == target_inicio:
-            fila_encontrada = num_fila
-            break
-
-      # 2. Búsqueda de respaldo por Nombre únicamente
-      if not fila_encontrada:
-        for num_fila, fila in enumerate(filas_reales[1:], start=2):
-          if len(fila) >= 1:
-            if str(fila[0]).strip().lower() == target_nombre:
-              fila_encontrada = num_fila
-              break
-
-      if fila_encontrada:
-        valor_escribir = "Completada" if nuevo_estado else "Pendiente"
-        # Columna 6 = Columna F (Estado)
-        sheet.update_cell(fila_encontrada, 6, valor_escribir)
-        st.cache_data.clear()
-        return True
-      else:
-        st.error(
-            f"No se encontró la actividad '{actividad_nom}' en Google Sheets."
-        )
-        return False
-
+      # Invalida caché para refrescar
+      st.cache_data.clear()
     except Exception as err:
       st.error(f"Error al escribir en Google Sheets: {err}")
-      return False
-
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -236,22 +204,22 @@ else:
   if actividades_hoy:
     for idx, row in actividades_hoy:
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
       )
-      is_finalizada = val_est in ["completada", "true"]
+      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
-      inicio_raw = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
       with col_check:
-        estado_checkbox = st.checkbox(
-            "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
+        st.checkbox(
+            "",
+            value=is_finalizada,
+            key=f"check_hoy_{idx}_{titulo}",
+            on_change=completar_tarea_callback,
+            args=(idx, not is_finalizada),
         )
-        if estado_checkbox != is_finalizada:
-          if completar_tarea_por_datos(titulo, inicio_raw, estado_checkbox):
-            st.rerun()
 
       with col_info:
         candado = "🔒 " if es_priv else ""
@@ -273,9 +241,9 @@ else:
       is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
       is_private = str(row.get("Privado", "false")).upper() == "TRUE"
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
       )
-      is_finalizada = val_est in ["completada", "true"]
+      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
 
       titulo_display = str(row.get("Actividad", "Sin Nombre"))
       if is_private:
@@ -310,6 +278,7 @@ else:
       "editable": False,
   }
 
+  # Se asigna una key dinámica fija para evitar que se desmonte al navegar
   calendar(
       events=eventos_calendario,
       options=calendar_options,
@@ -318,15 +287,15 @@ else:
 
   st.markdown("---")
 
-  # SECCIÓN LISTA DE TAREAS Y GESTIÓN
+  # SECCIÓN PESTAÑA LISTA DE TAREAS Y GESTIÓN
   st.subheader("📋 Lista de Tareas y Gestión")
 
   if not df_actividades.empty:
     for idx, row in df_actividades.iterrows():
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
       )
-      is_finalizada = val_est in ["completada", "true"]
+      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
       inicio_raw = str(row.get("Inicio", ""))
       titulo_act = str(row.get("Actividad", ""))
 
@@ -374,10 +343,12 @@ else:
         if is_finalizada:
           st.markdown("🟣 **Finalizada**")
         else:
-          # Botón con clave única basada en el título y la fecha para garantizar respuesta inmediata
-          if st.button("☑️ Marcar Lista", key=f"btn_gestion_{idx}_{titulo_act}"):
-            if completar_tarea_por_datos(titulo_act, inicio_raw, True):
-              st.rerun()
+          st.button(
+              "☑️ Marcar Lista",
+              key=f"btn_tab_gestion_{idx}",
+              on_click=completar_tarea_callback,
+              args=(idx, True),
+          )
       st.divider()
   else:
     st.info("No hay tareas registradas")
