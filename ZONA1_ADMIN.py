@@ -71,7 +71,6 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  # CARGA DE DATOS SIN TTL O CACHÉ DE CORTO TIEMPO PARA EVITAR DATOS OBSOLETOS
   @st.cache_data(ttl=1)
   def cargar_datos_hoja():
     rows = sheet.get_all_values()
@@ -95,30 +94,44 @@ else:
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN BÚSQUEDA Y ACTUALIZACIÓN RESISTENTE
-  def cambiar_estado_actividad(actividad_nom, nuevo_estado):
+  # FUNCIÓN ACTUALIZACIÓN POR ACTIVIDAD + FECHA/HORA
+  def cambiar_estado_actividad(
+      actividad_nom, inicio_fch, nuevo_estado, idx_fallback=None
+  ):
     try:
-      # Obtenemos los datos directos desde Google Sheets (evita desfases de caché)
       filas_reales = sheet.get_all_values()
       fila_encontrada = None
 
       target_nombre = str(actividad_nom).strip().lower()
+      target_inicio = str(inicio_fch).strip().lower()
 
-      # Recorremos la hoja desde la fila 2 (evitamos los encabezados)
+      # 1. Búsqueda por Actividad + Fecha de Inicio
       for num_fila, fila in enumerate(filas_reales[1:], start=2):
-        if len(fila) > 0:
-          nombre_hoja = str(fila[0]).strip().lower()
-          if nombre_hoja == target_nombre:
+        if len(fila) >= 2:
+          nom_col = str(fila[0]).strip().lower()
+          ini_col = str(fila[1]).strip().lower()
+          if nom_col == target_nombre and ini_col == target_inicio:
             fila_encontrada = num_fila
             break
+
+      # 2. Búsqueda por Nombre de Actividad únicamente
+      if not fila_encontrada:
+        for num_fila, fila in enumerate(filas_reales[1:], start=2):
+          if len(fila) >= 1:
+            if str(fila[0]).strip().lower() == target_nombre:
+              fila_encontrada = num_fila
+              break
+
+      # 3. Fallback por índice
+      if not fila_encontrada and idx_fallback is not None:
+        fila_encontrada = idx_fallback + 2
 
       if fila_encontrada:
         val_str = "Completada" if nuevo_estado else "Pendiente"
 
-        # Columna F es la número 6 (Estado)
+        # Columna 6 = Columna F (Estado)
         sheet.update_cell(fila_encontrada, 6, val_str)
 
-        # Invalida completamente el caché para repintar la vista
         st.cache_data.clear()
         return True
       else:
@@ -173,10 +186,25 @@ else:
       "🔒 Actividad privada (Solo Admin)", value=False
   )
 
+  # SELECTOR DE COLOR SÓLO PARA STREAMLIT (NO SE GUARDA EN GOOGLE SHEETS)
+  PALETA_COLORES = {
+      "🔵 Azul (Predeterminado)": "#3788d8",
+      "🔴 Rojo (Urgente)": "#dc3545",
+      "🟡 Amarillo (En proceso)": "#ffc107",
+      "🟣 Morado (Reunión)": "#6f42c1",
+      "🟠 Naranja (Pendiente)": "#fd7e14",
+      "⚫ Gris (Extra)": "#6c757d",
+  }
+  opcion_color = st.sidebar.selectbox(
+      "Color de la actividad en Calendario", options=list(PALETA_COLORES.keys())
+  )
+  color_seleccionado = PALETA_COLORES[opcion_color]
+
   if st.sidebar.button("💾 Guardar Actividad 💾"):
     if not actividad:
       st.sidebar.warning("Por favor ingresa un título para la actividad")
     else:
+      # Guardamos exactamente 6 columnas en Google Sheets
       nueva_fila = [
           actividad,
           start_str,
@@ -206,15 +234,14 @@ else:
   if actividades_hoy:
     for idx, row in actividades_hoy:
       val_estado = (
-          str(
-              row.get("Estado", row.get("Finalizada", "Pendiente"))
-          )
+          str(row.get("Estado", row.get("Finalizada", "Pendiente")))
           .strip()
           .lower()
       )
       is_finalizada = val_estado in ["completada", "true"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
+      inicio_raw = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
@@ -223,7 +250,9 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_actividad(titulo, checked):
+          if cambiar_estado_actividad(
+              titulo, inicio_raw, checked, idx_fallback=idx
+          ):
             st.rerun()
 
       with col_info:
@@ -263,9 +292,7 @@ else:
         is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
         val_estado = (
-            str(
-                row.get("Estado", row.get("Finalizada", "Pendiente"))
-            )
+            str(row.get("Estado", row.get("Finalizada", "Pendiente")))
             .strip()
             .lower()
         )
@@ -277,8 +304,7 @@ else:
         if is_finalizada:
           titulo_display = f"✅ {titulo_display}"
 
-        # Asignación del color verde si está completada
-        color_evento = "#28a745" if is_finalizada else "#3788d8"
+        color_evento = "#28a745" if is_finalizada else color_seleccionado
 
         evento = {
             "title": titulo_display,
@@ -312,9 +338,7 @@ else:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
         val_estado = (
-            str(
-                row.get("Estado", row.get("Finalizada", "Pendiente"))
-            )
+            str(row.get("Estado", row.get("Finalizada", "Pendiente")))
             .strip()
             .lower()
         )
@@ -366,8 +390,10 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
-              if cambiar_estado_actividad(titulo_act, True):
+            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}_{titulo_act}"):
+              if cambiar_estado_actividad(
+                  titulo_act, inicio_raw, True, idx_fallback=idx
+              ):
                 st.rerun()
         st.divider()
     else:
