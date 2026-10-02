@@ -87,50 +87,27 @@ else:
               "Fin",
               "AllDay",
               "Privado",
-              "Estado",
+              "Finalizada",
           ]
       )
 
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN DE ACTUALIZACIÓN DIRECTA
-  def cambiar_estado_actividad(actividad_nom, nuevo_estado, idx_fila_df):
+  # CALLBACK PARA MODO INSTANTÁNEO (AL HACER CLIC EN BOTONES DE PESTAÑAS)
+  def marcar_como_completada_callback(idx_row, actividad_nombre):
     try:
-      filas_reales = sheet.get_all_values()
-      fila_encontrada = None
+      # Calculamos la fila real de Google Sheets:
+      # Fila en Sheets = índice en DataFrame + 2 (1 por encabezado, base 1)
+      num_fila_sheets = idx_row + 2
 
-      # 1. Búsqueda directa por índice físico de fila (+2 por encabezado y base 1)
-      num_fila_directa = idx_fila_df + 2
+      # Escribimos directo "TRUE" o "Completada" en la Columna 6 (F: Finalizada/Estado)
+      sheet.update_cell(num_fila_sheets, 6, "TRUE")
 
-      if num_fila_directa <= len(filas_reales):
-        fila_encontrada = num_fila_directa
-      else:
-        # 2. Búsqueda secundaria por coincidencia de texto en la Columna A
-        target_nombre = str(actividad_nom).strip().lower()
-        for num_f, fila in enumerate(filas_reales[1:], start=2):
-          if len(fila) >= 1:
-            if str(fila[0]).strip().lower() == target_nombre:
-              fila_encontrada = num_f
-              break
-
-      if fila_encontrada:
-        val_str = "Completada" if nuevo_estado else "Pendiente"
-
-        # Columna 6 = Columna F (Estado / Finalizada)
-        sheet.update_cell(fila_encontrada, 6, val_str)
-
-        st.cache_data.clear()
-        return True
-      else:
-        st.error(
-            f"No se encontró la fila de '{actividad_nom}' en Google Sheets."
-        )
-        return False
-
+      # Limpiamos caché para obligar a Streamlit a pedir los datos actualizados
+      st.cache_data.clear()
     except Exception as err:
-      st.error(f"Error al escribir en Google Sheets: {err}")
-      return False
+      st.error(f"Error actualizando en Google Sheets: {err}")
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -197,7 +174,7 @@ else:
           end_str,
           "TRUE" if es_all_day else "FALSE",
           "TRUE" if es_privado else "FALSE",
-          "Pendiente",
+          "FALSE",
       ]
 
       sheet.append_row(nueva_fila)
@@ -219,12 +196,10 @@ else:
 
   if actividades_hoy:
     for idx, row in actividades_hoy:
-      val_estado = (
-          str(row.get("Estado", row.get("Finalizada", "Pendiente")))
-          .strip()
-          .lower()
+      val_est = (
+          str(row.get("Finalizada", row.get("Estado", ""))).strip().upper()
       )
-      is_finalizada = val_estado in ["completada", "true"]
+      is_finalizada = val_est in ["TRUE", "COMPLETADA"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
 
@@ -235,8 +210,8 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_actividad(titulo, checked, idx):
-            st.rerun()
+          marcar_como_completada_callback(idx, titulo)
+          st.rerun()
 
       with col_info:
         candado = "🔒 " if es_priv else ""
@@ -274,12 +249,10 @@ else:
       for idx, row in df_actividades.iterrows():
         is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
-        val_estado = (
-            str(row.get("Estado", row.get("Finalizada", "Pendiente")))
-            .strip()
-            .lower()
+        val_est = (
+            str(row.get("Finalizada", row.get("Estado", ""))).strip().upper()
         )
-        is_finalizada = val_estado in ["completada", "true"]
+        is_finalizada = val_est in ["TRUE", "COMPLETADA"]
 
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
         if is_private:
@@ -320,12 +293,10 @@ else:
   with tab_registro:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
-        val_estado = (
-            str(row.get("Estado", row.get("Finalizada", "Pendiente")))
-            .strip()
-            .lower()
+        val_est = (
+            str(row.get("Finalizada", row.get("Estado", ""))).strip().upper()
         )
-        is_finalizada = val_estado in ["completada", "true"]
+        is_finalizada = val_est in ["TRUE", "COMPLETADA"]
         inicio_raw = str(row.get("Inicio", ""))
         titulo_act = str(row.get("Actividad", ""))
 
@@ -373,9 +344,13 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}_{titulo_act}"):
-              if cambiar_estado_actividad(titulo_act, True, idx):
-                st.rerun()
+            # Uso de on_click callback directo para asegurar la ejecución en Streamlit Tabs
+            st.button(
+                "☑️ Marcar Lista",
+                key=f"btn_tab_admin_{idx}",
+                on_click=marcar_como_completada_callback,
+                args=(idx, titulo_act),
+            )
         st.divider()
     else:
       st.info("No hay tareas registradas")
