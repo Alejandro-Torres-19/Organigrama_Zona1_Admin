@@ -208,7 +208,6 @@ else:
     ])
 
     # PESTAÑA 1: VISTA DE CALENDARIO
-    # PESTAÑA 1: VISTA DE CALENDARIO
     with tab_calendario:
         eventos_calendario = []
 
