@@ -12,24 +12,26 @@ st.set_page_config(
     page_title="CRONOGRAMA Zona 1 (Admin)", page_icon="🔒", layout="wide"
 )
 
-# ESTILOS CSS PARA PERMITIR MULTILÍNEA Y EXPANDIR CELDAS EN EL CALENDARIO
+# ESTILOS CSS ACTUALIZADOS PARA PERMITIR MULTILÍNEA EN FULLCALENDAR
 st.markdown(
     """
     <style>
-    /* Permite que el texto del evento se ajuste en varias líneas y no se corte con "..." */
-    .fc-event-main {
+    /* Forzar que los títulos de los eventos y contenedores hagan salto de línea */
+    .fc-event, .fc-event-main, .fc-event-title, .fc-daygrid-event {
         white-space: normal !important;
         overflow: visible !important;
-        text-overflow: clip !important;
+        text-overflow: initial !important;
         height: auto !important;
     }
-    .fc-daygrid-event {
-        white-space: normal !important;
-        align-items: normal !important;
+    .fc-daygrid-event-harness {
+        margin-bottom: 2px !important;
     }
-    /* Expande la altura mínima de las celdas del mes para dar espacio a textos largos */
+    /* Asegurar espacio vertical automático en las celdas del mes */
     .fc-daygrid-day-frame {
-        min-height: 120px !important;
+        min-height: 130px !important;
+    }
+    .fc-daygrid-day-events {
+        max-height: none !important;
     }
     </style>
     """,
@@ -302,12 +304,11 @@ else:
       "initialView": "dayGridMonth",
       "displayEventTime": False,
       "eventDisplay": "block",
-      "dayMaxEvents": False,  # <-- Permite visualizar todo el texto largo sin recortarlo
+      "dayMaxEvents": False,
       "selectable": True,
       "editable": False,
   }
 
-  # Se asigna una key dinámica fija para evitar que se desmonte al navegar
   calendar(
       events=eventos_calendario,
       options=calendar_options,
