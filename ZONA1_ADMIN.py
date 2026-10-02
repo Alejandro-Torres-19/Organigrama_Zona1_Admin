@@ -73,7 +73,8 @@ else:
     st.stop()
 
 
-  # OBTENER DATOS CON PROTECCIÓN Y SIN CACHÉ RETARDADO PARA SINCRONIZACIÓN PERFECTA
+  # OBTENER DATOS CON PROTECCIÓN Y SIN CACHÉ RETARDADO
+  @st.cache_data(ttl=1)
   def obtener_datos_actualizados():
     for intento in range(3):
       try:
@@ -104,8 +105,8 @@ else:
   df_actividades = obtener_datos_actualizados()
 
 
-  # FUNCIÓN DE ACTUALIZACIÓN CON RECARGA FORZADA INSTANTÁNEA
-  def completar_tarea_callback(fila_index, nuevo_estado=True):
+  # FUNCIÓN DE ACTUALIZACIÓN DIRECTA EN GOOGLE SHEETS
+  def completar_tarea(fila_index, nuevo_estado=True):
     try:
       num_fila_sheets = int(fila_index) + 2
       valor_escribir = "Completada" if nuevo_estado else "Pendiente"
@@ -113,10 +114,12 @@ else:
       # Escribir en Columna 6 (F: Estado / Finalizada)
       sheet.update_cell(num_fila_sheets, 6, valor_escribir)
 
-      # Forzar limpieza total de caché en memoria
+      # Limpiar caché para reflejar el cambio inmediato
       st.cache_data.clear()
+      return True
     except Exception as err:
       st.error(f"Error al escribir en Google Sheets: {err}")
+      return False
 
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
@@ -216,18 +219,11 @@ else:
       col_check, col_info = st.columns([0.08, 0.92])
 
       with col_check:
-        # Al cambiar el checkbox, ejecuta la función y recarga inmediatamente con st.rerun()
-        if st.checkbox(
-            "",
-            value=is_finalizada,
-            key=f"check_hoy_{idx}_{titulo}",
-        ):
-          if not is_finalizada:
-            completar_tarea_callback(idx, True)
-            st.rerun()
-        else:
-          if is_finalizada:
-            completar_tarea_callback(idx, False)
+        estado_checkbox = st.checkbox(
+            "", value=is_finalizada, key=f"check_hoy_{idx}"
+        )
+        if estado_checkbox != is_finalizada:
+          if completar_tarea(idx, estado_checkbox):
             st.rerun()
 
       with col_info:
@@ -351,9 +347,10 @@ else:
         if is_finalizada:
           st.markdown("🟣 **Finalizada**")
         else:
+          # Se usa un botón estándar que al presionarse ejecuta la función y recarga inmediatamente la app
           if st.button("☑️ Marcar Lista", key=f"btn_gestion_{idx}"):
-            completar_tarea_callback(idx, True)
-            st.rerun()
+            if completar_tarea(idx, True):
+              st.rerun()
       st.divider()
   else:
     st.info("No hay tareas registradas")
