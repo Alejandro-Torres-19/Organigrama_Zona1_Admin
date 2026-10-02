@@ -94,42 +94,30 @@ else:
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN ACTUALIZACIÓN POR ACTIVIDAD + FECHA/HORA
-  def cambiar_estado_actividad(
-      actividad_nom, inicio_fch, nuevo_estado, idx_fallback=None
-  ):
+  # FUNCIÓN DE ACTUALIZACIÓN DIRECTA
+  def cambiar_estado_actividad(actividad_nom, nuevo_estado, idx_fila_df):
     try:
       filas_reales = sheet.get_all_values()
       fila_encontrada = None
 
-      target_nombre = str(actividad_nom).strip().lower()
-      target_inicio = str(inicio_fch).strip().lower()
+      # 1. Búsqueda directa por índice físico de fila (+2 por encabezado y base 1)
+      num_fila_directa = idx_fila_df + 2
 
-      # 1. Búsqueda por Actividad + Fecha de Inicio
-      for num_fila, fila in enumerate(filas_reales[1:], start=2):
-        if len(fila) >= 2:
-          nom_col = str(fila[0]).strip().lower()
-          ini_col = str(fila[1]).strip().lower()
-          if nom_col == target_nombre and ini_col == target_inicio:
-            fila_encontrada = num_fila
-            break
-
-      # 2. Búsqueda por Nombre de Actividad únicamente
-      if not fila_encontrada:
-        for num_fila, fila in enumerate(filas_reales[1:], start=2):
+      if num_fila_directa <= len(filas_reales):
+        fila_encontrada = num_fila_directa
+      else:
+        # 2. Búsqueda secundaria por coincidencia de texto en la Columna A
+        target_nombre = str(actividad_nom).strip().lower()
+        for num_f, fila in enumerate(filas_reales[1:], start=2):
           if len(fila) >= 1:
             if str(fila[0]).strip().lower() == target_nombre:
-              fila_encontrada = num_fila
+              fila_encontrada = num_f
               break
-
-      # 3. Fallback por índice
-      if not fila_encontrada and idx_fallback is not None:
-        fila_encontrada = idx_fallback + 2
 
       if fila_encontrada:
         val_str = "Completada" if nuevo_estado else "Pendiente"
 
-        # Columna 6 = Columna F (Estado)
+        # Columna 6 = Columna F (Estado / Finalizada)
         sheet.update_cell(fila_encontrada, 6, val_str)
 
         st.cache_data.clear()
@@ -186,7 +174,6 @@ else:
       "🔒 Actividad privada (Solo Admin)", value=False
   )
 
-  # SELECTOR DE COLOR SÓLO PARA STREAMLIT (NO SE GUARDA EN GOOGLE SHEETS)
   PALETA_COLORES = {
       "🔵 Azul (Predeterminado)": "#3788d8",
       "🔴 Rojo (Urgente)": "#dc3545",
@@ -204,7 +191,6 @@ else:
     if not actividad:
       st.sidebar.warning("Por favor ingresa un título para la actividad")
     else:
-      # Guardamos exactamente 6 columnas en Google Sheets
       nueva_fila = [
           actividad,
           start_str,
@@ -241,7 +227,6 @@ else:
       is_finalizada = val_estado in ["completada", "true"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
-      inicio_raw = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
@@ -250,9 +235,7 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_actividad(
-              titulo, inicio_raw, checked, idx_fallback=idx
-          ):
+          if cambiar_estado_actividad(titulo, checked, idx):
             st.rerun()
 
       with col_info:
@@ -391,9 +374,7 @@ else:
             st.markdown("🟣 **Finalizada**")
           else:
             if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}_{titulo_act}"):
-              if cambiar_estado_actividad(
-                  titulo_act, inicio_raw, True, idx_fallback=idx
-              ):
+              if cambiar_estado_actividad(titulo_act, True, idx):
                 st.rerun()
         st.divider()
     else:
