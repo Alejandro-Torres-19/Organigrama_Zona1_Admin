@@ -72,8 +72,8 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  # OBTENER DATOS CON CACHÉ Y PROTECCIÓN CONTRA CUOTAS (TTL=2)
-  @st.cache_data(ttl=2)
+
+  # OBTENER DATOS CON PROTECCIÓN Y SIN CACHÉ RETARDADO PARA SINCRONIZACIÓN PERFECTA
   def obtener_datos_actualizados():
     for intento in range(3):
       try:
@@ -100,9 +100,11 @@ else:
         columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
     )
 
+
   df_actividades = obtener_datos_actualizados()
 
-  # CALLBACK DIRECTO PARA ACTUALIZACIÓN INSTANTÁNEA
+
+  # FUNCIÓN DE ACTUALIZACIÓN CON RECARGA FORZADA INSTANTÁNEA
   def completar_tarea_callback(fila_index, nuevo_estado=True):
     try:
       num_fila_sheets = int(fila_index) + 2
@@ -111,10 +113,11 @@ else:
       # Escribir en Columna 6 (F: Estado / Finalizada)
       sheet.update_cell(num_fila_sheets, 6, valor_escribir)
 
-      # Invalida caché para refrescar
+      # Forzar limpieza total de caché en memoria
       st.cache_data.clear()
     except Exception as err:
       st.error(f"Error al escribir en Google Sheets: {err}")
+
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -204,22 +207,28 @@ else:
   if actividades_hoy:
     for idx, row in actividades_hoy:
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
       )
-      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
+      is_finalizada = val_est in ["completada", "true"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
       with col_check:
-        st.checkbox(
+        # Al cambiar el checkbox, ejecuta la función y recarga inmediatamente con st.rerun()
+        if st.checkbox(
             "",
             value=is_finalizada,
             key=f"check_hoy_{idx}_{titulo}",
-            on_change=completar_tarea_callback,
-            args=(idx, not is_finalizada),
-        )
+        ):
+          if not is_finalizada:
+            completar_tarea_callback(idx, True)
+            st.rerun()
+        else:
+          if is_finalizada:
+            completar_tarea_callback(idx, False)
+            st.rerun()
 
       with col_info:
         candado = "🔒 " if es_priv else ""
@@ -241,9 +250,9 @@ else:
       is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
       is_private = str(row.get("Privado", "false")).upper() == "TRUE"
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
       )
-      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
+      is_finalizada = val_est in ["completada", "true"]
 
       titulo_display = str(row.get("Actividad", "Sin Nombre"))
       if is_private:
@@ -278,7 +287,6 @@ else:
       "editable": False,
   }
 
-  # Se asigna una key dinámica fija para evitar que se desmonte al navegar
   calendar(
       events=eventos_calendario,
       options=calendar_options,
@@ -287,15 +295,15 @@ else:
 
   st.markdown("---")
 
-  # SECCIÓN PESTAÑA LISTA DE TAREAS Y GESTIÓN
+  # SECCIÓN LISTA DE TAREAS Y GESTIÓN
   st.subheader("📋 Lista de Tareas y Gestión")
 
   if not df_actividades.empty:
     for idx, row in df_actividades.iterrows():
       val_est = (
-          str(row.get("Estado", row.get("Finalizada", ""))).strip().upper()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
       )
-      is_finalizada = val_est in ["COMPLETADA", "TRUE"]
+      is_finalizada = val_est in ["completada", "true"]
       inicio_raw = str(row.get("Inicio", ""))
       titulo_act = str(row.get("Actividad", ""))
 
@@ -343,12 +351,9 @@ else:
         if is_finalizada:
           st.markdown("🟣 **Finalizada**")
         else:
-          st.button(
-              "☑️ Marcar Lista",
-              key=f"btn_tab_gestion_{idx}",
-              on_click=completar_tarea_callback,
-              args=(idx, True),
-          )
+          if st.button("☑️ Marcar Lista", key=f"btn_gestion_{idx}"):
+            completar_tarea_callback(idx, True)
+            st.rerun()
       st.divider()
   else:
     st.info("No hay tareas registradas")
