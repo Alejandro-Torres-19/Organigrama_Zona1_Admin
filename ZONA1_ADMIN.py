@@ -87,42 +87,54 @@ else:
               "Fin",
               "AllDay",
               "Privado",
-              "Finalizada",
+              "Estado",
           ]
       )
 
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN BÚSQUEDA DINÁMICA Y ACTUALIZACIÓN DIRECTA
-  def cambiar_estado_actividad(actividad_nombre, nuevo_estado):
+  # ESTRUCTURA EXACTA "CALENDARIO COMPARTIDO ALEXOS"
+  def cambiar_estado_actividad(actividad_nom, inicio_fch, nuevo_estado):
     try:
-      # Obtenemos todos los nombres de la Columna A (Actividades)
-      col_actividades = sheet.col_values(1)
+      todas_las_filas = sheet.get_all_values()
+      fila_destino = None
 
-      fila_encontrada = None
-      target = str(actividad_nombre).strip().lower()
+      act_target = str(actividad_nom).strip().lower()
+      ini_target = str(inicio_fch).strip().lower()
 
-      # Buscamos la fila exacta en la hoja
-      for idx, val in enumerate(col_actividades):
-        if str(val).strip().lower() == target:
-          fila_encontrada = idx + 1  # Google Sheets usa índice base 1
-          break
+      # Buscar la fila combinando Actividad + Inicio (evita errores de duplicados/índices)
+      for idx, fila in enumerate(todas_las_filas[1:], start=2):
+        if len(fila) >= 2:
+          act_col = str(fila[0]).strip().lower()
+          ini_col = str(fila[1]).strip().lower()
+          if act_col == act_target and ini_col == ini_target:
+            fila_destino = idx
+            break
 
-      if fila_encontrada:
-        val_str = "TRUE" if nuevo_estado else "FALSE"
-        # Columna 6 = Columna F (Finalizada)
-        sheet.update_cell(fila_encontrada, 6, val_str)
+      # Respuesto si la fecha no coincide exactamente por segundos/formato
+      if not fila_destino:
+        for idx, fila in enumerate(todas_las_filas[1:], start=2):
+          if len(fila) >= 1:
+            if str(fila[0]).strip().lower() == act_target:
+              fila_destino = idx
+              break
+
+      if fila_destino:
+        # Guarda "Completada" o "Pendiente" como en Alexos
+        texto_estado = "Completada" if nuevo_estado else "Pendiente"
+
+        # Columna 6 (Columna F: Estado)
+        sheet.update_cell(fila_destino, 6, texto_estado)
+
         st.cache_data.clear()
         return True
       else:
-        st.error(
-            f"No se encontró la actividad '{actividad_nombre}' en la hoja."
-        )
+        st.error(f"No se encontró '{actividad_nom}' en la hoja.")
         return False
 
     except Exception as err:
-      st.error(f"Error actualizando la hoja: {err}")
+      st.error(f"Error al actualizar la hoja: {err}")
       return False
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
@@ -177,7 +189,7 @@ else:
           end_str,
           "TRUE" if es_all_day else "FALSE",
           "TRUE" if es_privado else "FALSE",
-          "FALSE",
+          "Pendiente",
       ]
 
       sheet.append_row(nueva_fila)
@@ -199,12 +211,13 @@ else:
 
   if actividades_hoy:
     for idx, row in actividades_hoy:
-      is_finalizada = str(row.get("Finalizada", "false")).upper() in [
-          "TRUE",
-          "COMPLETADA",
-      ]
+      val_estado = (
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+      )
+      is_finalizada = val_estado in ["completada", "true"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = row.get("Actividad", "Sin nombre")
+      inicio_raw = str(row.get("Inicio", ""))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
@@ -213,7 +226,7 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_actividad(titulo, checked):
+          if cambiar_estado_actividad(titulo, inicio_raw, checked):
             st.rerun()
 
       with col_info:
@@ -252,10 +265,10 @@ else:
       for idx, row in df_actividades.iterrows():
         is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
-        is_finalizada = str(row.get("Finalizada", "false")).upper() in [
-            "TRUE",
-            "COMPLETADA",
-        ]
+        val_estado = (
+            str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+        )
+        is_finalizada = val_estado in ["completada", "true"]
 
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
         if is_private:
@@ -263,6 +276,7 @@ else:
         if is_finalizada:
           titulo_display = f"✅ {titulo_display}"
 
+        # Color verde (#28a745) si está completada
         color_evento = "#28a745" if is_finalizada else "#3788d8"
 
         evento = {
@@ -296,10 +310,10 @@ else:
   with tab_registro:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
-        is_finalizada = str(row.get("Finalizada", "false")).upper() in [
-            "TRUE",
-            "COMPLETADA",
-        ]
+        val_estado = (
+            str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
+        )
+        is_finalizada = val_estado in ["completada", "true"]
         inicio_raw = str(row.get("Inicio", ""))
         titulo_act = str(row.get("Actividad", ""))
 
@@ -348,7 +362,7 @@ else:
             st.markdown("🟣 **Finalizada**")
           else:
             if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
-              if cambiar_estado_actividad(titulo_act, True):
+              if cambiar_estado_actividad(titulo_act, inicio_raw, True):
                 st.rerun()
         st.divider()
     else:
