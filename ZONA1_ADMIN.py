@@ -124,13 +124,13 @@ else:
       num_fila_sheets = int(fila_index) + 2
       row_data = sheet.row_values(num_fila_sheets)
 
-      client = sheet.client
+      # Obtenemos el libro de Google Sheets directamente desde la hoja actual
+      spreadsheet = sheet.spreadsheet
+
       try:
-        sheet_completadas = client.open("ORGANIGRAMA_ZONA1").worksheet(
-            "Completadas"
-        )
+        sheet_completadas = spreadsheet.worksheet("Completadas")
       except:
-        sheet_completadas = client.open("ORGANIGRAMA_ZONA1").add_worksheet(
+        sheet_completadas = spreadsheet.add_worksheet(
             title="Completadas", rows=100, cols=10
         )
 
