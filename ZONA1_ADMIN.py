@@ -71,8 +71,8 @@ else:
     st.error(f"Error al conectarse a Google Sheets: {e}")
     st.stop()
 
-  @st.cache_data(ttl=1)
-  def cargar_datos_hoja():
+  # CARGAR DATOS DIRECTAMENTE
+  def obtener_datos_actualizados():
     rows = sheet.get_all_values()
     if len(rows) > 1:
       headers = [str(h).strip() for h in rows[0]]
@@ -87,27 +87,41 @@ else:
               "Fin",
               "AllDay",
               "Privado",
-              "Finalizada",
+              "Estado",
           ]
       )
 
-  # CARGAR DATOS
-  df_actividades = cargar_datos_hoja()
+  # PERSISTENCIA EN SESSION STATE PARA EVITAR ERRORES EN PEASTATICAS/PESTAÑAS
+  if "df_actividades" not in st.session_state or st.sidebar.button(
+      "🔄 Recargar Datos"
+  ):
+    st.session_state.df_actividades = obtener_datos_actualizados()
 
-  # CALLBACK PARA MODO INSTANTÁNEO (AL HACER CLIC EN BOTONES DE PESTAÑAS)
-  def marcar_como_completada_callback(idx_row, actividad_nombre):
+  df_actividades = st.session_state.df_actividades
+
+  # FUNCIÓN CALLBACK QUE SE EJECUTA INMEDIATAMENTE AL HACER CLIC EN CUALQUIER BOTÓN O CHECKBOX
+  def completar_tarea_callback(fila_index, nuevo_estado=True):
     try:
-      # Calculamos la fila real de Google Sheets:
-      # Fila en Sheets = índice en DataFrame + 2 (1 por encabezado, base 1)
-      num_fila_sheets = idx_row + 2
+      # Número de fila física en Google Sheets (Encabezado es Fila 1)
+      num_fila_sheets = int(fila_index) + 2
+      valor_escribir = "Completada" if nuevo_estado else "Pendiente"
 
-      # Escribimos directo "TRUE" o "Completada" en la Columna 6 (F: Finalizada/Estado)
-      sheet.update_cell(num_fila_sheets, 6, "TRUE")
+      # Escribir directamente en la Columna 6 (F: Estado)
+      sheet.update_cell(num_fila_sheets, 6, valor_escribir)
 
-      # Limpiamos caché para obligar a Streamlit a pedir los datos actualizados
-      st.cache_data.clear()
+      # Actualizar en la memoria local inmediatamente
+      st.session_state.df_actividades.at[fila_index, "Estado"] = valor_escribir
+      if "Finalizada" in st.session_state.df_actividades.columns:
+        st.session_state.df_actividades.at[fila_index, "Finalizada"] = (
+            valor_escribir
+        )
+
+      st.toast(
+          f"✅ Tarea actualizada a '{valor_escribir}' en Google Sheets",
+          icon="🎉",
+      )
     except Exception as err:
-      st.error(f"Error actualizando en Google Sheets: {err}")
+      st.error(f"Error al actualizar en Google Sheets: {err}")
 
   # BARRA LATERAL: AGREGAR ACTIVIDADES
   st.sidebar.header("➕ Agregar nueva actividad")
@@ -174,11 +188,11 @@ else:
           end_str,
           "TRUE" if es_all_day else "FALSE",
           "TRUE" if es_privado else "FALSE",
-          "FALSE",
+          "Pendiente",
       ]
 
       sheet.append_row(nueva_fila)
-      st.cache_data.clear()
+      st.session_state.df_actividades = obtener_datos_actualizados()
       st.sidebar.success("✅ Actividad guardada con éxito")
       st.rerun()
 
@@ -197,25 +211,26 @@ else:
   if actividades_hoy:
     for idx, row in actividades_hoy:
       val_est = (
-          str(row.get("Finalizada", row.get("Estado", ""))).strip().upper()
+          str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
       )
-      is_finalizada = val_est in ["TRUE", "COMPLETADA"]
+      is_finalizada = val_est in ["completada", "true"]
       es_priv = str(row.get("Privado", "false")).upper() == "TRUE"
       titulo = str(row.get("Actividad", "Sin nombre"))
 
       col_check, col_info = st.columns([0.08, 0.92])
 
       with col_check:
-        checked = st.checkbox(
-            "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
+        st.checkbox(
+            "",
+            value=is_finalizada,
+            key=f"check_hoy_{idx}_{titulo}",
+            on_change=completar_tarea_callback,
+            args=(idx, not is_finalizada),
         )
-        if checked != is_finalizada:
-          marcar_como_completada_callback(idx, titulo)
-          st.rerun()
 
       with col_info:
         candado = "🔒 " if es_priv else ""
-        if checked:
+        if is_finalizada:
           st.markdown(f"~~{candado}**{titulo}**~~ (🟢 *Completada*)")
         else:
           st.markdown(f"🟡 **{candado}{titulo}** *(Pendiente)*")
@@ -242,6 +257,7 @@ else:
       ["📅 Vista Calendario", "📋 Lista de Tareas y Gestión"]
   )
 
+  # PESTAÑA 1: VISTA CALENDARIO
   with tab_calendario:
     eventos_calendario = []
 
@@ -250,9 +266,9 @@ else:
         is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
         val_est = (
-            str(row.get("Finalizada", row.get("Estado", ""))).strip().upper()
+            str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
         )
-        is_finalizada = val_est in ["TRUE", "COMPLETADA"]
+        is_finalizada = val_est in ["completada", "true"]
 
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
         if is_private:
@@ -294,9 +310,9 @@ else:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
         val_est = (
-            str(row.get("Finalizada", row.get("Estado", ""))).strip().upper()
+            str(row.get("Estado", row.get("Finalizada", ""))).strip().lower()
         )
-        is_finalizada = val_est in ["TRUE", "COMPLETADA"]
+        is_finalizada = val_est in ["completada", "true"]
         inicio_raw = str(row.get("Inicio", ""))
         titulo_act = str(row.get("Actividad", ""))
 
@@ -344,12 +360,12 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            # Uso de on_click callback directo para asegurar la ejecución en Streamlit Tabs
+            # Botón con callback para asegurar la ejecución dentro de las pestañas
             st.button(
                 "☑️ Marcar Lista",
-                key=f"btn_tab_admin_{idx}",
-                on_click=marcar_como_completada_callback,
-                args=(idx, titulo_act),
+                key=f"btn_tab_gestion_{idx}",
+                on_click=completar_tarea_callback,
+                args=(idx, True),
             )
         st.divider()
     else:
