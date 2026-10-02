@@ -87,7 +87,6 @@ else:
               "Fin",
               "AllDay",
               "Privado",
-              "Color",
               "Finalizada",
           ]
       )
@@ -95,17 +94,16 @@ else:
   # CARGAR DATOS
   df_actividades = cargar_datos_hoja()
 
-  # FUNCIÓN PARA CAMBIAR ESTADO DIRECTO POR FILA (SIN BÚSQUEDA COMPLICADA)
-  def cambiar_estado_por_indice(indice_df, nuevo_estado):
+  # FUNCIÓN BÚSQUEDA Y ACTUALIZACIÓN DIRECTA
+  def cambiar_estado_actividad(indice_df, nuevo_estado):
     try:
-      # La fila en Google Sheets es el índice de Pandas + 2 (1 por encabezado + 1 por índice base 1)
+      # Fila en Sheets = índice en DataFrame + 2 (1 por encabezado, base 1)
       num_fila_sheets = indice_df + 2
 
-      # Valor booleano como texto
       val_str = "TRUE" if nuevo_estado else "FALSE"
 
-      # Columna 7 = Columna G (Finalizada)
-      sheet.update_cell(num_fila_sheets, 7, val_str)
+      # Columna F (Columna 6 en Google Sheets: Finalizada)
+      sheet.update_cell(num_fila_sheets, 6, val_str)
 
       st.cache_data.clear()
       return True
@@ -155,19 +153,6 @@ else:
       "🔒 Actividad privada (Solo Admin)", value=False
   )
 
-  PALETA_COLORES = {
-      "🔵 Azul (Predeterminado)": "#3788d8",
-      "🔴 Rojo (Urgente)": "#dc3545",
-      "🟡 Amarillo (En proceso)": "#ffc107",
-      "🟣 Morado (Reunión)": "#6f42c1",
-      "🟠 Naranja (Pendiente)": "#fd7e14",
-      "⚫ Gris (Extra)": "#6c757d",
-  }
-  opcion_color = st.sidebar.selectbox(
-      "Color de la actividad", options=list(PALETA_COLORES.keys())
-  )
-  color_evento = PALETA_COLORES[opcion_color]
-
   if st.sidebar.button("💾 Guardar Actividad 💾"):
     if not actividad:
       st.sidebar.warning("Por favor ingresa un título para la actividad")
@@ -178,7 +163,6 @@ else:
           end_str,
           "TRUE" if es_all_day else "FALSE",
           "TRUE" if es_privado else "FALSE",
-          color_evento,
           "FALSE",
       ]
 
@@ -215,7 +199,7 @@ else:
             "", value=is_finalizada, key=f"check_hoy_{idx}_{titulo}"
         )
         if checked != is_finalizada:
-          if cambiar_estado_por_indice(idx, checked):
+          if cambiar_estado_actividad(idx, checked):
             st.rerun()
 
       with col_info:
@@ -265,18 +249,16 @@ else:
         if is_finalizada:
           titulo_display = f"✅ {titulo_display}"
 
-        # Verde si está completada, si no mantiene el color asignado
-        color_actual = (
-            "#28a745" if is_finalizada else str(row.get("Color", "#3788d8"))
-        )
+        # Color verde para completadas, azul estándar para pendientes
+        color_evento = "#28a745" if is_finalizada else "#3788d8"
 
         evento = {
             "title": titulo_display,
             "start": str(row.get("Inicio", "")),
             "end": str(row.get("Fin", "")),
             "allDay": is_all_day,
-            "backgroundColor": color_actual,
-            "borderColor": color_actual,
+            "backgroundColor": color_evento,
+            "borderColor": color_evento,
             "textColor": "#FFFFFF",
             "display": "block",
         }
@@ -352,8 +334,8 @@ else:
           if is_finalizada:
             st.markdown("🟣 **Finalizada**")
           else:
-            if st.button("☑️️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
-              if cambiar_estado_por_indice(idx, True):
+            if st.button("☑️ Marcar Lista", key=f"btn_tab_admin_{idx}"):
+              if cambiar_estado_actividad(idx, True):
                 st.rerun()
         st.divider()
     else:
