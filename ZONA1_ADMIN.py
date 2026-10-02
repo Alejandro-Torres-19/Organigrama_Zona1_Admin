@@ -96,16 +96,24 @@ else:
 
   # FUNCIÓN CONVERTIENDO EXPLÍCITAMENTE A NÚMEROS ENTEROS (INT)
   def actualizar_estado_por_id(id_buscar, nuevo_estado):
-    try:
-      val_celda = sheet.find(str(id_buscar).strip())
-      if val_celda:
-        # Fila y Columna deben ser enteros
-        num_fila = int(val_celda.row)
-        num_columna = 8  # Columna H = Columna 8 (Finalizada)
+      try:
+        val_celda = sheet.find(str(id_buscar).strip())
+        if val_celda:
+          num_fila = int(val_celda.row)
+          num_columna = 8  # Columna H (Finalizada)
 
-        texto_estado = "TRUE" if nuevo_estado else "FALSE"
-        sheet.update_cell(num_fila, num_columna, texto_texto)
+          texto_estado = "TRUE" if nuevo_estado else "FALSE"
+          # CORREGIDO: Usar texto_estado en lugar de texto_texto
+          sheet.update_cell(num_fila, num_columna, texto_estado)
 
+          st.cache_data.clear()
+          return True
+        else:
+          st.error(f"No se encontró la ID {id_buscar} en el documento.")
+          return False
+      except Exception as err:
+        st.error(f"Error técnico de gspread: {err}")
+        return False
         st.cache_data.clear()
         return True
       else:
