@@ -148,7 +148,14 @@ else:
     except Exception:
       pass
     return pd.DataFrame(
-        columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]
+        columns=[
+            "Actividad",
+            "Fecha Inicio",
+            "Fecha Fin",
+            "Privado",
+            "Estado",
+            "Color",
+        ]
     )
 
 
@@ -239,7 +246,7 @@ else:
             end_str_exclusivo,
             "TRUE" if es_privado else "FALSE",
             "Pendiente",
-            color_seleccionado,  # Guarda el color individualmente por tarea
+            color_seleccionado,
         ]
 
         sheet.append_row(nueva_fila)
@@ -286,7 +293,6 @@ else:
         if is_private:
           titulo_display = f"🔒 {titulo_display}"
 
-        # Lee el color guardado en la fila; si está vacío, usa azul por defecto
         color_fila = str(row.get("Color", ""))
         if not color_fila.startswith("#"):
           color_fila = "#3788d8"
@@ -445,4 +451,4 @@ else:
             "Aún no hay tareas marcadas como completadas en la hoja de datos."
         )
     else:
-      st.info("Aún no hay tareas marcadas como completadas en la hoja de datos.")tos.")
+      st.info("Aún no hay tareas marcadas como completadas en la hoja de datos.")
