@@ -105,12 +105,26 @@ else:
           return df.loc[:, df.columns != ""]
         else:
           return pd.DataFrame(
-              columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]
+              columns=[
+                  "Actividad",
+                  "Fecha Inicio",
+                  "Fecha Fin",
+                  "Privado",
+                  "Estado",
+                  "Color",
+              ]
           )
       except gspread.exceptions.APIError:
         time.sleep(1)
     return pd.DataFrame(
-        columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]
+        columns=[
+            "Actividad",
+            "Fecha Inicio",
+            "Fecha Fin",
+            "Privado",
+            "Estado",
+            "Color",
+        ]
     )
 
 
@@ -134,7 +148,7 @@ else:
     except Exception:
       pass
     return pd.DataFrame(
-        columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]
+        columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]
     )
 
 
@@ -144,8 +158,8 @@ else:
       num_fila_sheets = int(fila_index) + 2
       row_data = sheet.row_values(num_fila_sheets)
 
-      # Asegurar que el estado en la columna E (índice 4) cambie a "Completada"
-      while len(row_data) < 5:
+      # Asegurar que la fila tenga espacio hasta la columna de Estado (índice 4) y Color (índice 5)
+      while len(row_data) < 6:
         row_data.append("")
       row_data[4] = "Completada"
 
@@ -189,7 +203,6 @@ else:
           "Fecha Fin", value=datetime.date.today(), format="DD/MM/YYYY"
       )
 
-    # FullCalendar requiere que el 'end' de un evento de varios días sea exclusivo (+1 día)
     start_str = fecha_inicio.strftime("%Y-%m-%d")
     end_str_exclusivo = (fecha_fin + datetime.timedelta(days=1)).strftime(
         "%Y-%m-%d"
@@ -226,6 +239,7 @@ else:
             end_str_exclusivo,
             "TRUE" if es_privado else "FALSE",
             "Pendiente",
+            color_seleccionado,  # Guarda el color individualmente por tarea
         ]
 
         sheet.append_row(nueva_fila)
@@ -243,7 +257,6 @@ else:
       for idx, row in df_actividades.iterrows():
         f_ini = str(row.get("Fecha Inicio", ""))
         f_fin = str(row.get("Fecha Fin", ""))
-        # Comprobar si la fecha de hoy se encuentra dentro del rango de la actividad
         if f_ini and f_fin:
           try:
             if f_ini <= hoy_iso < f_fin:
@@ -269,18 +282,22 @@ else:
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
-
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
         if is_private:
           titulo_display = f"🔒 {titulo_display}"
+
+        # Lee el color guardado en la fila; si está vacío, usa azul por defecto
+        color_fila = str(row.get("Color", ""))
+        if not color_fila.startswith("#"):
+          color_fila = "#3788d8"
 
         evento = {
             "title": titulo_display,
             "start": str(row.get("Fecha Inicio", "")),
             "end": str(row.get("Fecha Fin", "")),
-            "allDay": True,  # Siempre ocupará los días completos del rango
-            "backgroundColor": color_seleccionado,
-            "borderColor": color_seleccionado,
+            "allDay": True,
+            "backgroundColor": color_fila,
+            "borderColor": color_fila,
             "textColor": "#FFFFFF",
             "display": "block",
         }
@@ -314,7 +331,6 @@ else:
         key="calendario_principal_fijo",
     )
 
-    # INYECCIÓN DE JS PARA FORZAR EL ESTILO MULTILÍNEA
     components.html(
         """
       <script>
@@ -351,7 +367,6 @@ else:
 
         try:
           f_ini_fmt = pd.to_datetime(f_ini_raw).strftime("%d-%m-%Y")
-          # Como la fecha fin guardada incluye +1 día por el calendario, la ajustamos visualmente para mostrar el rango real
           f_fin_real = pd.to_datetime(f_fin_raw) - datetime.timedelta(days=1)
           f_fin_fmt = f_fin_real.strftime("%d-%m-%Y")
 
@@ -419,15 +434,15 @@ else:
           with c1:
             st.write(rango_fmt)
           with c2:
-            st.write(f"~~{titulo_act}~~")  # Tachado para completadas
+            st.write(f"~~{titulo_act}~~")
           with c3:
             st.markdown("🟢 **Completada**")
           with c4:
-            st.empty()  # Espacio libre para equilibrar columnas
+            st.empty()
           st.divider()
       else:
         st.info(
             "Aún no hay tareas marcadas como completadas en la hoja de datos."
         )
     else:
-      st.info("Aún no hay tareas marcadas como completadas en la hoja de datos.")
+      st.info("Aún no hay tareas marcadas como completadas en la hoja de datos.")tos.")
