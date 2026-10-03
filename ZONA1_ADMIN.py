@@ -105,19 +105,12 @@ else:
           return df.loc[:, df.columns != ""]
         else:
           return pd.DataFrame(
-              columns=[
-                  "Actividad",
-                  "Inicio",
-                  "Fin",
-                  "AllDay",
-                  "Privado",
-                  "Estado",
-              ]
+              columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]
           )
       except gspread.exceptions.APIError:
         time.sleep(1)
     return pd.DataFrame(
-        columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
+        columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]
     )
 
 
@@ -141,7 +134,7 @@ else:
     except Exception:
       pass
     return pd.DataFrame(
-        columns=["Actividad", "Inicio", "Fin", "AllDay", "Privado", "Estado"]
+        columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]
     )
 
 
@@ -151,10 +144,10 @@ else:
       num_fila_sheets = int(fila_index) + 2
       row_data = sheet.row_values(num_fila_sheets)
 
-      # Asegurar que el estado en la columna F (índice 5) cambie a "Completada"
-      while len(row_data) < 6:
-        row_data.append("")  # Rellenar si faltaran columnas
-      row_data[5] = "Completada"
+      # Asegurar que el estado en la columna E (índice 4) cambie a "Completada"
+      while len(row_data) < 5:
+        row_data.append("")
+      row_data[4] = "Completada"
 
       spreadsheet = sheet.spreadsheet
 
@@ -184,40 +177,23 @@ else:
 
     actividad = st.sidebar.text_input("Descripción de la Actividad")
 
-    es_all_day = st.sidebar.checkbox(
-        "📅 ¿Es actividad de todo el día? 📅", value=False
+    # SELECCIÓN DE RANGO DE FECHAS
+    st.sidebar.subheader("📅 Rango de Fechas")
+    col_f1, col_f2 = st.sidebar.columns(2)
+    with col_f1:
+      fecha_inicio = col_f1.date_input(
+          "Fecha Inicio", value=datetime.date.today(), format="DD/MM/YYYY"
+      )
+    with col_f2:
+      fecha_fin = col_f2.date_input(
+          "Fecha Fin", value=datetime.date.today(), format="DD/MM/YYYY"
+      )
+
+    # FullCalendar requiere que el 'end' de un evento de varios días sea exclusivo (+1 día)
+    start_str = fecha_inicio.strftime("%Y-%m-%d")
+    end_str_exclusivo = (fecha_fin + datetime.timedelta(days=1)).strftime(
+        "%Y-%m-%d"
     )
-
-    if es_all_day:
-      col_f1, col_f2 = st.sidebar.columns(2)
-      with col_f1:
-        fecha_inicio = col_f1.date_input(
-            "Fecha Inicio", value=datetime.date.today(), format="DD/MM/YYYY"
-        )
-      with col_f2:
-        fecha_fin = col_f2.date_input(
-            "Fecha Final", value=datetime.date.today(), format="DD/MM/YYYY"
-        )
-
-      start_str = fecha_inicio.strftime("%Y-%m-%d")
-      end_str = (fecha_fin + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-
-    else:
-      fecha_act = st.sidebar.date_input(
-          "Fecha de la Actividad",
-          value=datetime.date.today(),
-          format="DD/MM/YYYY",
-      )
-      hora_act = st.sidebar.time_input("Hora Inicio", value=datetime.time(9, 0))
-      duracion_horas = st.sidebar.number_input(
-          "Duración (Horas)", min_value=1, max_value=24, value=1
-      )
-
-      dt_start = datetime.datetime.combine(fecha_act, hora_act)
-      dt_end = dt_start + datetime.timedelta(hours=int(duracion_horas))
-
-      start_str = dt_start.isoformat()
-      end_str = dt_end.isoformat()
 
     es_privado = st.sidebar.toggle(
         "🔒 Actividad privada (Solo Admin)", value=False
@@ -239,12 +215,15 @@ else:
     if st.sidebar.button("💾 Guardar Actividad 💾"):
       if not actividad:
         st.sidebar.warning("Por favor ingresa un título para la actividad")
+      elif fecha_fin < fecha_inicio:
+        st.sidebar.error(
+            "La fecha de fin no puede ser anterior a la fecha de inicio"
+        )
       else:
         nueva_fila = [
             actividad,
             start_str,
-            end_str,
-            "TRUE" if es_all_day else "FALSE",
+            end_str_exclusivo,
             "TRUE" if es_privado else "FALSE",
             "Pendiente",
         ]
@@ -262,9 +241,15 @@ else:
     actividades_hoy = []
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
-        inicio_val = str(row.get("Inicio", ""))
-        if inicio_val.startswith(hoy_iso):
-          actividades_hoy.append((idx, row))
+        f_ini = str(row.get("Fecha Inicio", ""))
+        f_fin = str(row.get("Fecha Fin", ""))
+        # Comprobar si la fecha de hoy se encuentra dentro del rango de la actividad
+        if f_ini and f_fin:
+          try:
+            if f_ini <= hoy_iso < f_fin:
+              actividades_hoy.append((idx, row))
+          except Exception:
+            pass
 
     if actividades_hoy:
       for idx, row in actividades_hoy:
@@ -283,7 +268,6 @@ else:
     eventos_calendario = []
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
-        is_all_day = str(row.get("AllDay", "false")).upper() == "TRUE"
         is_private = str(row.get("Privado", "false")).upper() == "TRUE"
 
         titulo_display = str(row.get("Actividad", "Sin Nombre"))
@@ -292,9 +276,9 @@ else:
 
         evento = {
             "title": titulo_display,
-            "start": str(row.get("Inicio", "")),
-            "end": str(row.get("Fin", "")),
-            "allDay": is_all_day,
+            "start": str(row.get("Fecha Inicio", "")),
+            "end": str(row.get("Fecha Fin", "")),
+            "allDay": True,  # Siempre ocupará los días completos del rango
             "backgroundColor": color_seleccionado,
             "borderColor": color_seleccionado,
             "textColor": "#FFFFFF",
@@ -361,39 +345,32 @@ else:
 
     if not df_actividades.empty:
       for idx, row in df_actividades.iterrows():
-        inicio_raw = str(row.get("Inicio", ""))
+        f_ini_raw = str(row.get("Fecha Inicio", ""))
+        f_fin_raw = str(row.get("Fecha Fin", ""))
         titulo_act = str(row.get("Actividad", ""))
 
-        fecha_fmt = inicio_raw
-        hora_fmt = ""
-
         try:
-          if "T" in inicio_raw:
-            partes = inicio_raw.split("T")
-            fecha_fmt = pd.to_datetime(partes[0]).strftime("%d-%m-%Y")
-            if len(partes) > 1 and len(partes[1]) >= 5:
-              hora_fmt = partes[1][:5]
-          elif " " in inicio_raw:
-            partes = inicio_raw.split(" ")
-            fecha_fmt = pd.to_datetime(partes[0]).strftime("%d-%m-%Y")
-            if len(partes) > 1 and len(partes[1]) >= 5:
-              hora_fmt = partes[1][:5]
-          else:
-            fecha_fmt = pd.to_datetime(inicio_raw).strftime("%d-%m-%Y")
-        except Exception:
-          pass
+          f_ini_fmt = pd.to_datetime(f_ini_raw).strftime("%d-%m-%Y")
+          # Como la fecha fin guardada incluye +1 día por el calendario, la ajustamos visualmente para mostrar el rango real
+          f_fin_real = pd.to_datetime(f_fin_raw) - datetime.timedelta(days=1)
+          f_fin_fmt = f_fin_real.strftime("%d-%m-%Y")
 
-        c1, c2, c3, c4, c5 = st.columns([0.2, 0.15, 0.35, 0.15, 0.15])
+          if f_ini_fmt == f_fin_fmt:
+            rango_fmt = f"**{f_ini_fmt}**"
+          else:
+            rango_fmt = f"**{f_ini_fmt} al {f_fin_fmt}**"
+        except Exception:
+          rango_fmt = f"**{f_ini_raw}**"
+
+        c1, c2, c3, c4 = st.columns([0.35, 0.35, 0.15, 0.15])
 
         with c1:
-          st.write(f"**{fecha_fmt}**")
+          st.write(rango_fmt)
         with c2:
-          st.write(hora_fmt if hora_fmt else "--:--")
-        with c3:
           st.write(titulo_act)
-        with c4:
+        with c3:
           st.markdown("🟡 **Pendiente**")
-        with c5:
+        with c4:
           st.button(
               "☑️ Marcar Lista",
               key=f"btn_tab_gestion_{idx}",
@@ -411,7 +388,8 @@ else:
   elif menu_opcion == "✅ Tareas Completadas":
     st.subheader("✅ Historial de Actividades Completadas")
     st.markdown(
-        "Aquí se muestran todas las tareas que han sido marcadas como listas."
+        "Aquí se muestran todas las tareas que han sido marcadas como listas"
+        " y guardadas en la hoja de datos."
     )
 
     df_completadas = obtener_tareas_completadas()
@@ -421,41 +399,35 @@ else:
 
       if not df_completadas.empty:
         for idx, row in df_completadas.iterrows():
-          inicio_raw = str(row.get("Inicio", ""))
+          f_ini_raw = str(row.get("Fecha Inicio", ""))
+          f_fin_raw = str(row.get("Fecha Fin", ""))
           titulo_act = str(row.get("Actividad", ""))
 
-          fecha_fmt = inicio_raw
-          hora_fmt = ""
-
           try:
-            if "T" in inicio_raw:
-              partes = inicio_raw.split("T")
-              fecha_fmt = pd.to_datetime(partes[0]).strftime("%d-%m-%Y")
-              if len(partes) > 1 and len(partes[1]) >= 5:
-                hora_fmt = partes[1][:5]
-            elif " " in inicio_raw:
-              partes = inicio_raw.split(" ")
-              fecha_fmt = pd.to_datetime(partes[0]).strftime("%d-%m-%Y")
-              if len(partes) > 1 and len(partes[1]) >= 5:
-                hora_fmt = partes[1][:5]
-            else:
-              fecha_fmt = pd.to_datetime(inicio_raw).strftime("%d-%m-%Y")
-          except Exception:
-            pass
+            f_ini_fmt = pd.to_datetime(f_ini_raw).strftime("%d-%m-%Y")
+            f_fin_real = pd.to_datetime(f_fin_raw) - datetime.timedelta(days=1)
+            f_fin_fmt = f_fin_real.strftime("%d-%m-%Y")
 
-          c1, c2, c3, c4 = st.columns([0.25, 0.2, 0.4, 0.15])
+            if f_ini_fmt == f_fin_fmt:
+              rango_fmt = f"**{f_ini_fmt}**"
+            else:
+              rango_fmt = f"**{f_ini_fmt} al {f_fin_fmt}**"
+          except Exception:
+            rango_fmt = f"**{f_ini_raw}**"
+
+          c1, c2, c3, c4 = st.columns([0.35, 0.35, 0.15, 0.15])
           with c1:
-            st.write(f"**{fecha_fmt}**")
+            st.write(rango_fmt)
           with c2:
-            st.write(hora_fmt if hora_fmt else "--:--")
+            st.write(f"~~{titulo_act}~~")  # Tachado para completadas
           with c3:
-            st.write(f"~~{titulo_act}~~")
-          with c4:
             st.markdown("🟢 **Completada**")
+          with c4:
+            st.empty()  # Espacio libre para equilibrar columnas
           st.divider()
       else:
         st.info(
-            "Aún no hay tareas marcadas como completadas."
+            "Aún no hay tareas marcadas como completadas en la hoja de datos."
         )
     else:
-      st.info("Aún no hay tareas marcadas como completadas.")
+      st.info("Aún no hay tareas marcadas como completadas en la hoja de datos.")
