@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Panel Maestro - Zona 1", page_icon="🏫", layout="wide"
+    page_title="Cronograma - Admin - Zona 1", page_icon="🏫", layout="wide"
 )
 
 # --- CREDENCIALES Y CONEXIÓN A GOOGLE SHEETS ---
@@ -33,12 +33,12 @@ def conectar_gspread():
 
 try:
     spreadsheet = conectar_gspread()
-    sheet_principal = spreadsheet.get_worksheet(0) # Pestaña 1: Maestro / General
+    sheet_principal = spreadsheet.get_worksheet(0) # Pestaña 1: General
 except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
 
-# --- SEGURIDAD: LOGIN MAESTRO ---
+# --- SEGURIDAD: LOGIN ADMINISTRADOR ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == "Taguch_77":
@@ -52,7 +52,7 @@ def check_password():
         with col_centro:
             st.markdown("<br><br>", unsafe_allow_html=True)
             with st.container(border=True):
-                st.markdown("<h2 style='text-align: center;'>🏫 Panel Maestro</h2>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align: center;'>🏫 Cronograma - Admin</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align: center; color: gray;'>Sistema de Gestión y Seguimiento - Zona 1</p>", unsafe_allow_html=True)
                 st.markdown("---")
                 st.text_input(
@@ -69,7 +69,7 @@ def check_password():
         with col_centro:
             st.markdown("<br><br>", unsafe_allow_html=True)
             with st.container(border=True):
-                st.markdown("<h2 style='text-align: center;'>🏫 Panel Maestro</h2>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align: center;'>🏫 Cronograma - Admin</h2>", unsafe_allow_html=True)
                 st.markdown("<p style='text-align: center; color: gray;'>Sistema de Gestión y Seguimiento - Zona 1</p>", unsafe_allow_html=True)
                 st.markdown("---")
                 st.text_input(
@@ -103,7 +103,6 @@ def cargar_datos_principales():
         )
     else:
         df = pd.DataFrame(data)
-        # Asegurar columnas mínimas para evitar KeyErrors
         for col in ["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]:
             if col not in df.columns:
                 df[col] = ""
@@ -111,24 +110,14 @@ def cargar_datos_principales():
 
 df_tareas = cargar_datos_principales()
 
-# --- BARRA LATERAL: NAVEGACIÓN Y REGISTRO DE TAREAS ---
+# --- BARRA LATERAL: REGISTRO DE ACTIVIDADES (ARRIBA) Y NAVEGACIÓN (ABAJO) ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/school.png", width=80)
     st.title("Supervisión Zona 1")
     st.markdown("---")
     
-    selected = option_menu(
-        menu_title="Navegación",
-        options=["Cronograma y Gestión", "Dashboard de Zona", "Tareas Completadas"],
-        icons=["calendar-week", "bar-chart-fill", "check-circle-fill"],
-        menu_icon="pin-fill",
-        default_index=0,
-    )
-    
-    st.markdown("---")
+    # 1. PRIMERO: REGISTRAR ACTIVIDAD EN LA PARTE SUPERIOR
     st.subheader("➕ Registrar Actividad")
-    
-    # Formulario en la barra lateral como lo solicitaste
     with st.form("form_nueva_actividad_sidebar"):
         nom_actividad = st.text_input("Nombre de la Actividad")
         es_privada = st.selectbox("¿Es una tarea privada?", ["No", "Sí"])
@@ -141,10 +130,9 @@ with st.sidebar:
         else:
             f_fin = st.date_input("Fecha de Fin", value=date.today())
 
-        # Selector de colores con sus funciones predefinidas
+        # Colores disponibles (Sin el verde, reservado para cuando se complete al 100%)
         st.markdown("**Selecciona Color / Estado:**")
         opciones_colores = {
-            "🟢 Verde (Completado / Zona al 100%)": "#28a745",
             "🟡 Amarillo (Pendiente / En proceso)": "#ffc107",
             "🟣 Morado (Especial / Institucional)": "#6f42c1",
             "🔴 Rojo (Urgente / Retrasado)": "#dc3545",
@@ -170,23 +158,36 @@ with st.sidebar:
             else:
                 st.warning("Ingresa el nombre de la actividad.")
 
+    st.markdown("---")
+    
+    # 2. SEGUNDO: MENÚ DE NAVEGACIÓN ABAJO
+    selected = option_menu(
+        menu_title="Navegación",
+        options=["Cronograma y Gestión", "Dashboard de Zona", "Tareas Completadas"],
+        icons=["calendar-week", "bar-chart-fill", "check-circle-fill"],
+        menu_icon="pin-fill",
+        default_index=0,
+    )
+
 # --- 1. SECCIÓN: CRONOGRAMA Y GESTIÓN ---
 if selected == "Cronograma y Gestión":
-    st.title("📅 Cronograma Global y Gestión de Actividades (Maestro)")
+    st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY ---
+    # --- SECCIÓN: PENDIENTES DE HOY (BLINDADA CONTRA ERRORES DE TIPO) ---
     st.markdown("### 🔔 Pendientes de Hoy")
     hoy_actual = date.today()
     
     if not df_tareas.empty:
-        # Conversión segura de fechas
+        # Conversión y limpieza robusta para evitar TypeError en comparaciones de fecha
         df_tareas["Fecha Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.date
         df_tareas["Fecha Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.date
         
-        pendientes_hoy = df_tareas[
-            (df_tareas["Fecha Inicio_dt"] <= hoy_actual) & 
-            (df_tareas["Fecha Fin_dt"] >= hoy_actual)
+        df_validas = df_tareas.dropna(subset=["Fecha Inicio_dt", "Fecha Fin_dt"])
+        
+        pendientes_hoy = df_validas[
+            (df_validas["Fecha Inicio_dt"] <= hoy_actual) & 
+            (df_validas["Fecha Fin_dt"] >= hoy_actual)
         ]
         
         if not pendientes_hoy.empty:
@@ -219,7 +220,7 @@ if selected == "Cronograma y Gestión":
                 "title": f"{'🔒 ' if row['Privado']=='Sí' else '🏫 '}{row['Actividad']}",
                 "start": str(row["Fecha Inicio"]),
                 "end": f_fin_ajustada,
-                "color": row["Color"] if row["Color"] else "#3788d8",
+                "color": row["Color"] if row["Color"] else "#ffc107",
                 "allDay": True
             })
 
