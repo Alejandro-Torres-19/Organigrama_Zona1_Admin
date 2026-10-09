@@ -122,21 +122,23 @@ with st.sidebar:
         nom_actividad = st.text_input("Nombre de la Actividad")
         es_privada = st.selectbox("¿Es una tarea privada?", ["No", "Sí"])
         
-        f_inicio = st.date_input("Fecha de Inicio", value=date.today())
+        # Formato de fecha en DD/MM/YYYY
+        f_inicio = st.date_input("Fecha de Inicio", value=date.today(), format="DD/MM/YYYY")
         
         solo_un_dia = st.checkbox("¿Actividad de un solo día?")
         if solo_un_dia:
             f_fin = f_inicio
         else:
-            f_fin = st.date_input("Fecha de Fin", value=date.today())
+            f_fin = st.date_input("Fecha de Fin", value=date.today(), format="DD/MM/YYYY")
 
-        # Colores disponibles (Sin el verde, reservado para cuando se complete al 100%)
+        # Colores disponibles (Azul predeterminado y Gris extra, sin verde)
         st.markdown("**Selecciona Color / Estado:**")
         opciones_colores = {
+            "🔵 Azul (Predeterminado)": "#3788d8",
             "🟡 Amarillo (Pendiente / En proceso)": "#ffc107",
             "🟣 Morado (Especial / Institucional)": "#6f42c1",
             "🔴 Rojo (Urgente / Retrasado)": "#dc3545",
-            "⚪ Gris (Inactivo / Opcional)": "#6c757d"
+            "⚪ Gris (Extra)": "#6c757d"
         }
         color_seleccionado_key = st.selectbox("Función / Color", list(opciones_colores.keys()))
         color_actividad = opciones_colores[color_seleccionado_key]
@@ -174,14 +176,13 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY (BLINDADA CONTRA ERRORES DE TIPO) ---
+    # --- SECCIÓN: PENDIENTES DE HOY ---
     st.markdown("### 🔔 Pendientes de Hoy")
-    hoy_actual = date.today()
+    hoy_actual = pd.Timestamp(date.today()).normalize()
     
     if not df_tareas.empty:
-        # Conversión y limpieza robusta para evitar TypeError en comparaciones de fecha
-        df_tareas["Fecha Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.date
-        df_tareas["Fecha Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.date
+        df_tareas["Fecha Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce')
+        df_tareas["Fecha Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce')
         
         df_validas = df_tareas.dropna(subset=["Fecha Inicio_dt", "Fecha Fin_dt"])
         
@@ -220,7 +221,7 @@ if selected == "Cronograma y Gestión":
                 "title": f"{'🔒 ' if row['Privado']=='Sí' else '🏫 '}{row['Actividad']}",
                 "start": str(row["Fecha Inicio"]),
                 "end": f_fin_ajustada,
-                "color": row["Color"] if row["Color"] else "#ffc107",
+                "color": row["Color"] if row["Color"] else "#3788d8",
                 "allDay": True
             })
 
