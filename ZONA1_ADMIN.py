@@ -8,6 +8,16 @@ from google.oauth2.service_account import Credentials
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
+    from datetime import datetime, time, date
+import streamlit as st
+import pandas as pd
+from streamlit_option_menu import option_menu
+from streamlit_calendar import calendar
+import gspread
+from google.oauth2.service_account import Credentials
+
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(
     page_title="Cronograma - Admin - Zona 1", page_icon="🏫", layout="wide"
 )
 
@@ -180,7 +190,7 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY Y ATRASADAS (COMPACTA Y CON FORMATO DD-MM-YY) ---
+    # --- SECCIÓN: PENDIENTES DE HOY Y ATRASADAS ---
     st.markdown("### 🔔 Pendientes de Hoy y Atrasadas")
     hoy_str = date.today().strftime("%Y-%m-%d")
     
@@ -202,7 +212,11 @@ if selected == "Cronograma y Gestión":
                 
                 f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
                 f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
-                rango_fechas = f"📅 {f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
+                
+                if f_ini_fmt == f_fin_fmt:
+                    rango_fechas = f"📅 {f_ini_fmt}"
+                else:
+                    rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
                 
                 with st.container(border=True):
                     col_p1, col_p2, col_p3 = st.columns([3.5, 1, 0.8])
@@ -222,7 +236,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -236,7 +250,6 @@ if selected == "Cronograma y Gestión":
             f_fin_val = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_val
             
             try:
-                # FullCalendar requiere que la fecha final sea exclusiva (sumar 1 día) para abarcar todo el rango visualmente en la cuadrícula
                 f_fin_dt = pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)
                 f_fin_ajustada = str(f_fin_dt).split()[0]
             except:
@@ -276,7 +289,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS (COMPACTA Y CON FORMATO DD-MM-YY) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
@@ -288,7 +301,11 @@ if selected == "Cronograma y Gestión":
             
             f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
             f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
-            rango_fechas = f"📅 {f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
+            
+            if f_ini_fmt == f_fin_fmt:
+                rango_fechas = f"📅 {f_ini_fmt}"
+            else:
+                rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
             
             estado_actual = row["Estado"] if "Estado" in df_tareas.columns and row["Estado"] else "Pendiente"
             
