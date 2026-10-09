@@ -11,8 +11,7 @@ st.set_page_config(
     page_title="Cronograma - Admin - Zona 1", page_icon="🏫", layout="wide"
 )
 
-# --- CREDENCIALES Y CONEXIÓN A GOOGLE SHEETS ---
-@st.cache_resource
+# --- CONEXIÓN DIRECTA A GOOGLE SHEETS (SIN CACHÉ PARA FORZAR CAMBIOS) ---
 def conectar_gspread():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -87,7 +86,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- CARGAR DATOS DE LA HOJA PRINCIPAL ---
+# --- CARGAR DATOS FRESCOS DE LA HOJA PRINCIPAL ---
 def cargar_datos_principales():
     data = sheet_principal.get_all_records()
     if not data:
@@ -198,7 +197,7 @@ if selected == "Cronograma y Gestión":
             (df_tareas["Estado"].str.lower() != "completada")
         ]
         
-        # 2. Bloque de Hoy (La fecha de hoy está entre inicio y fin inclusive)
+        # 2. Bloque de Hoy (La fecha actual está entre inicio y fin inclusive)
         hoy_df = df_tareas[
             (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & 
             (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & 
@@ -275,7 +274,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO EN TODO EL RANGO VISUAL) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE EN TODO EL RANGO VISUAL) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -290,7 +289,7 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
-                # FullCalendar requiere que la fecha final sea exclusiva (+1 día) para estirarse por todo el rango de días en la vista mes
+                # FullCalendar requiere fecha final exclusiva (+1 día) para abarcar todo el rango visualmente
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
