@@ -174,12 +174,11 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY (CORREGIDA Y ROBUSTA) ---
+    # --- SECCIÓN: PENDIENTES DE HOY ---
     st.markdown("### 🔔 Pendientes de Hoy")
     hoy_str = date.today().strftime("%Y-%m-%d")
     
     if not df_tareas.empty:
-        # Extracción y limpieza segura comparando como texto Y fecha
         df_tareas["Fecha_Inicio_Str"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.strftime("%Y-%m-%d")
         df_tareas["Fecha_Fin_Str"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.strftime("%Y-%m-%d")
         
@@ -214,15 +213,14 @@ if selected == "Cronograma y Gestión":
             with col_t1:
                 priv_val = str(row["Privado"]).strip().lower()
                 es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-                 icono = "🔒 " if es_privada_bool else "🏫 "
+                icono = "🔒 " if es_privada_bool else "🏫 "
                 st.write(f"{icono} **{row['Actividad']}** (Del {row['Fecha Inicio']} al {row['Fecha Fin']})")
             with col_t2:
                 estado_actual = row["Estado"] if "Estado" in df_tareas.columns else "Pendiente"
                 st.write(f"Estado: *{estado_actual}*")
             with col_t3:
                 if st.button("Marcar Terminada", key=f"btn_terminar_{idx}"):
-                    # Actualizar en Google Sheets (fila index + 2 por el encabezado)
-                    sheet_principal.update_cell(idx + 2, 5, "Completada") # Columna 5: Estado
+                    sheet_principal.update_cell(idx + 2, 5, "Completada")
                     st.success(f"¡Actividad '{row['Actividad']}' marcada como completada!")
                     st.rerun()
     else:
@@ -325,7 +323,6 @@ elif selected == "Tareas Completadas":
     with tab_zona:
         st.subheader("Tareas con 100% de Cumplimiento en la Zona")
         if not df_tareas.empty and "Estado" in df_tareas.columns:
-            # Aquí puedes filtrar las que tengan el estado global de zona completado
             completadas_zona = df_tareas[df_tareas["Estado"] == "Completada Global"]
             if not completadas_zona.empty:
                 st.dataframe(completadas_zona[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True)
