@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Panel Maestro - Zona 1", page_icon="🏫", layout="wide"
+    page_title="Cronograma- Zona 1", page_icon="🏫", layout="wide"
 )
 
 # --- CREDENCIALES Y CONEXIÓN A GOOGLE SHEETS ---
@@ -126,13 +126,17 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades (Maestro)")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY (CORREGIDA Y FUNCIONAL) ---
+    # --- SECCIÓN: PENDIENTES DE HOY (CORREGIDA Y BLINDADA) ---
     st.markdown("### 🔔 Pendientes de Hoy")
     hoy_actual = date.today()
     
-    if not df_tareas.empty:
-        df_tareas["Fecha Inicio"] = pd.to_datetime(df_tareas["Fecha Inicio"]).dt.date
-        df_tareas["Fecha Fin"] = pd.to_datetime(df_tareas["Fecha Fin"]).dt.date
+    if not df_tareas.empty and "Fecha Inicio" in df_tareas.columns and "Fecha Fin" in df_tareas.columns:
+        # Limpieza y conversión segura de fechas para evitar errores si hay celdas vacías o mal formateadas
+        df_tareas["Fecha Inicio"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.date
+        df_tareas["Fecha Fin"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.date
+        
+        # Eliminar filas con fechas inválidas
+        df_tareas = df_tareas.dropna(subset=["Fecha Inicio", "Fecha Fin"])
         
         pendientes_hoy = df_tareas[
             (df_tareas["Fecha Inicio"] <= hoy_actual) & 
@@ -149,7 +153,7 @@ if selected == "Cronograma y Gestión":
         else:
             st.success("🎉 ¡Excelente! No hay actividades programadas para el día de hoy.")
     else:
-        st.info("No hay actividades registradas en el sistema.")
+        st.info("No hay actividades registradas en el sistema o faltan columnas de fecha.")
 
     st.markdown("---")
 
@@ -198,7 +202,6 @@ if selected == "Cronograma y Gestión":
     if not df_tareas.empty:
         for _, row in df_tareas.iterrows():
             try:
-                f_fin_obj = datetime.strptime(str(row["Fecha Fin"]), "%Y-%m-%d").date()
                 f_fin_ajustada = str(pd.to_datetime(row["Fecha Fin"]) + pd.Timedelta(days=1)).split()[0]
             except:
                 f_fin_ajustada = str(row["Fecha Fin"])
@@ -280,7 +283,7 @@ elif selected == "Tareas Completadas":
     st.title("✅ Historial de Tareas Completadas a Nivel Zona")
     st.markdown("Listado de actividades que han cumplido con el 100% de aprobación de las 12 escuelas.")
 
-    if not df_tareas.empty:
+    if not df_tareas.empty and "Estado" in df_tareas.columns:
         completadas_global = df_tareas[df_tareas["Estado"] == "Completada"]
         if not completadas_global.empty:
             st.dataframe(completadas_global, use_container_width=True)
