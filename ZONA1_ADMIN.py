@@ -186,11 +186,11 @@ if selected == "Cronograma y Gestión":
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
     hoy_dt = pd.Timestamp(date.today()).normalize()
-    hoy_str = hoy_dt.strftime("%Y-%m-%d")
     
     if not df_tareas.empty:
-        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce')
-        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce')
+        # Parseo exacto de fechas normalizadas a medianoche para evitar desajustes
+        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
+        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
         df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
         
         # 1. Bloque de Atrasadas (Fecha fin estrictamente menor a hoy y no completadas)
@@ -276,7 +276,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO EN TODO EL RANGO) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO EN TODO EL RANGO VISUAL) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -291,7 +291,7 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
-                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente
+                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente en la cuadrícula
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
