@@ -204,7 +204,6 @@ if selected == "Cronograma y Gestión":
                 f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
                 rango_fechas = f"📅 {f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
                 
-                # Contenedor ultra compacto en vertical
                 with st.container(border=True):
                     col_p1, col_p2, col_p3 = st.columns([3.5, 1, 0.8])
                     with col_p1:
@@ -223,7 +222,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -237,6 +236,7 @@ if selected == "Cronograma y Gestión":
             f_fin_val = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_val
             
             try:
+                # FullCalendar requiere que la fecha final sea exclusiva (sumar 1 día) para abarcar todo el rango visualmente en la cuadrícula
                 f_fin_dt = pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)
                 f_fin_ajustada = str(f_fin_dt).split()[0]
             except:
