@@ -172,7 +172,7 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY Y ATRASADAS ---
+    # --- SECCIÓN: PENDIENTES DE HOY Y ATRASADAS (EN FORMATO TABLA ESTÉTICA) ---
     st.markdown("### 🔔 Pendientes de Hoy y Atrasadas")
     hoy_str = date.today().strftime("%Y-%m-%d")
     
@@ -181,35 +181,41 @@ if selected == "Cronograma y Gestión":
         df_tareas["Fecha_Fin_Str"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.strftime("%Y-%m-%d")
         df_tareas["Fecha_Fin_Str"] = df_tareas["Fecha_Fin_Str"].fillna(df_tareas["Fecha_Inicio_Str"])
         
-        # Filtrar tareas pendientes que sean de hoy o atrasadas (cuya fecha fin sea menor o igual a hoy y no estén completadas)
-        pendientes_hoy = df_tareas[
-            (df_tareas["Fecha_Fin_Str"] >= hoy_str) & 
-            (df_tareas["Fecha_Inicio_Str"] <= hoy_str) &
+        # Filtrar tareas pendientes que sean de hoy o atrasadas (fecha fin <= hoy) y no completadas
+        pendientes_hoy_atrasadas = df_tareas[
+            (df_tareas["Fecha_Fin_Str"] <= hoy_str) & 
             (df_tareas["Estado"].str.lower() != "completada")
         ]
         
-        if not pendientes_hoy.empty:
-            cols_hoy = st.columns(min(len(pendientes_hoy), 3))
-            for idx, row in pendientes_hoy.iterrows():
-                col_idx = idx % len(cols_hoy)
-                with cols_hoy[col_idx]:
-                    priv_val = str(row["Privado"]).strip().lower()
-                    es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-                    tipo = "🔒 Privada" if es_privada_bool else "🏫 General"
-                    
-                    f_ini_fmt = str(row["Fecha Inicio"]).split("T")[0]
-                    f_fin_fmt = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_fmt
-                    vigencia = f"{f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"del {f_ini_fmt} al {f_fin_fmt}"
-                    
-                    st.info(f"**{row['Actividad']}**\n\n*Tipo:* {tipo}\n*Vigencia:* {vigencia}")
+        if not pendientes_hoy_atrasadas.empty:
+            for idx, row in pendientes_hoy_atrasadas.iterrows():
+                priv_val = str(row["Privado"]).strip().lower()
+                es_privada_bool = priv_val in ["true", "sí", "si", "1"]
+                icono = "🔒 " if es_privada_bool else "🏫 "
+                
+                f_ini_fmt = str(row["Fecha Inicio"]).split("T")[0]
+                f_fin_fmt = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_fmt
+                rango_fechas = f"📅 {f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
+                
+                with st.container(border=True):
+                    col_p1, col_p2, col_p3 = st.columns([3, 1.2, 1])
+                    with col_p1:
+                        st.markdown(f"**{icono} {row['Actividad']}**  \n*<small>{rango_fechas}</small>*", unsafe_allow_html=True)
+                    with col_p2:
+                        st.markdown("🟠 **Pendiente**", unsafe_allow_html=True)
+                    with col_p3:
+                        if st.button("✔️ Marcar", key=f"btn_hoy_{idx}"):
+                            sheet_principal.update_cell(idx + 2, 5, "Completada")
+                            st.success("¡Completada!")
+                            st.rerun()
         else:
-            st.success("🎉 ¡Excelente! No hay actividades pendientes para el día de hoy.")
+            st.success("🎉 ¡Excelente! No hay actividades pendientes ni atrasadas para el día de hoy.")
     else:
         st.info("No hay actividades registradas en el sistema.")
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -223,7 +229,6 @@ if selected == "Cronograma y Gestión":
             f_fin_val = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_val
             
             try:
-                # FullCalendar requiere que la fecha 'end' sea exclusiva sumando 1 día para abarcar todo el rango
                 f_fin_dt = pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)
                 f_fin_ajustada = str(f_fin_dt).split()[0]
             except:
@@ -252,7 +257,7 @@ if selected == "Cronograma y Gestión":
                 "buttonText": "Agenda Quincenal"
             },
             "dayGridMonth": {
-                "buttonText": "mes"
+                "buttonText": "Mes"
             }
         },
         "initialView": "listFortnight",
@@ -263,7 +268,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS (ESTILO TABLA LIMPIA DEBAJO DEL CALENDARIO) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS (DEBAJO DEL CALENDARIO) ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
