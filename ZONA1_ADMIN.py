@@ -201,12 +201,14 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    hoy_dt = pd.Timestamp(date.today()).normalize()
+    hoy_date_obj: date.today()
+    hoy_str = hoy_date_obj.strftime("%Y-%m-%d")    
     
     if not df_tareas.empty:
-        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
-        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
-        df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
+        df_tareas["Fecha_Inicio_Puro"] = df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0].str.strip()
+        df_tareas["Fecha_Fin_Puro"] = df_tareas["Fecha Fin"].astype(str).str.split("T").str[0].str.strip()
+        df_tareas["Fecha_Fin_Puro"] = df_tareas["Fecha_Fin_Puro"].replace(["", "nan", "NaT", "None"], pd.NA)
+        df_tareas["Fecha_Fin_Puro"] = df_tareas["Fecha_Fin_Puro"].fillna(df_tareas["Fecha_Inicio_Puro"])
         
         # 1. Bloque de Atrasadas (Fecha fin estrictamente menor a hoy y no completadas)
         atrasadas_df = df_tareas[
