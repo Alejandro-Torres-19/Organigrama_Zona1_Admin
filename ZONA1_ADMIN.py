@@ -239,18 +239,31 @@ if selected == "Cronograma y Gestión":
                         st.markdown("🔴 Atrasada", unsafe_allow_html=True)
                     with col_p3:
                         if st.button("✔️ Marcar", key=f"btn_atrasada_{orig_idx}"):
-                            sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
+                            # 1. Copiar a la hoja "Completadas"
                             try:
                                 sheet_completadas = spreadsheet.worksheet("Completadas")
                                 sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
                             except Exception:
                                 pass
-                            st.success("¡Completada!")
+                            # 2. Borrar de la hoja principal
+                            sheet_principal.delete_rows(orig_idx + 2)
+                            st.success("¡Completada y movida al historial!")
                             st.rerun()
                     with col_p4:
                         if st.button("🗑️ Borrar", key=f"del_atrasada_{orig_idx}"):
+                            # Borrar de principal
                             sheet_principal.delete_rows(orig_idx + 2)
-                            st.success("¡Eliminada!")
+                            # Intentar borrar también de "Completadas" si existiera ahí
+                            try:
+                                sheet_comp = spreadsheet.worksheet("Completadas")
+                                registros_comp = sheet_comp.get_all_records()
+                                for i, r in enumerate(registros_comp):
+                                    if str(r.get("Actividad")) == str(row["Actividad"]) and str(r.get("Fecha Inicio")) == str(row["Fecha Inicio"]):
+                                        sheet_comp.delete_rows(i + 2)
+                                        break
+                            except Exception:
+                                pass
+                            st.success("¡Eliminada por completo!")
                             st.rerun()
         else:
             st.success("🎉 ¡Excelente! No tienes actividades atrasadas.")
@@ -284,18 +297,31 @@ if selected == "Cronograma y Gestión":
                         st.markdown("🟠 Pendiente", unsafe_allow_html=True)
                     with col_h3:
                         if st.button("✔️ Marcar", key=f"btn_hoy_{orig_idx}"):
-                            sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
+                            # 1. Copiar a la hoja "Completadas"
                             try:
                                 sheet_completadas = spreadsheet.worksheet("Completadas")
                                 sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
                             except Exception:
                                 pass
-                            st.success("¡Completada!")
+                            # 2. Borrar de la hoja principal
+                            sheet_principal.delete_rows(orig_idx + 2)
+                            st.success("¡Completada y movida al historial!")
                             st.rerun()
                     with col_h4:
                         if st.button("🗑️ Borrar", key=f"del_hoy_{orig_idx}"):
+                            # Borrar de principal
                             sheet_principal.delete_rows(orig_idx + 2)
-                            st.success("¡Eliminada!")
+                            # Intentar borrar también de "Completadas"
+                            try:
+                                sheet_comp = spreadsheet.worksheet("Completadas")
+                                registros_comp = sheet_comp.get_all_records()
+                                for i, r in enumerate(registros_comp):
+                                    if str(r.get("Actividad")) == str(row["Actividad"]) and str(r.get("Fecha Inicio")) == str(row["Fecha Inicio"]):
+                                        sheet_comp.delete_rows(i + 2)
+                                        break
+                            except Exception:
+                                pass
+                            st.success("¡Eliminada por completo!")
                             st.rerun()
         else:
             st.success("🎉 ¡Excelente! No hay actividades programadas específicamente para el día de hoy.")
@@ -304,7 +330,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (SOLO HOJA PRINCIPAL) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     st.markdown("""
@@ -380,50 +406,58 @@ if selected == "Cronograma y Gestión":
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
     if not df_tareas.empty:
-        pendientes_gestion = df_tareas[df_tareas["Estado"].str.lower() != "completada"]
-        
-        if not pendientes_gestion.empty:
-            for idx, row in pendientes_gestion.iterrows():
-                orig_idx = row.name
-                
-                priv_val = str(row["Privado"]).strip().lower()
-                es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-                icono = "🔒 " if es_privada_bool else "🏫 "
-                
-                f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-                f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-                
-                f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-                f_fin_fmt = formatear_fecha_corta(f_fin_raw)
-                
-                if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
-                    rango_fechas = f"📅 {f_ini_fmt}"
-                else:
-                    rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt} (Rango Activo)"
-                
-                with st.container(border=True):
-                    col_t1, col_t2, col_t3, col_t4 = st.columns([3, 1, 0.7, 0.7])
-                    with col_t1:
-                        st.markdown(f"**{icono} {row['Actividad']}** &nbsp;|&nbsp; *<small>{rango_fechas}</small>*", unsafe_allow_html=True)
-                    with col_t2:
-                        st.markdown("🟠 Pendiente", unsafe_allow_html=True)
-                    with col_t3:
-                        if st.button("✔️ Marcar", key=f"btn_terminar_{orig_idx}"):
-                            sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
-                            try:
-                                sheet_completadas = spreadsheet.worksheet("Completadas")
-                                sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
-                            except Exception:
-                                pass
-                            st.success("¡Completada!")
-                            st.rerun()
-                    with col_t4:
-                        if st.button("🗑️ Borrar", key=f"del_gestion_{orig_idx}"):
-                            sheet_principal.delete_rows(orig_idx + 2)
-                            st.success("¡Eliminada!")
-                            st.rerun()
-        else:
-            st.success("🎉 ¡Excelente! No tienes actividades pendientes de gestión individual.")
+        for idx, row in df_tareas.iterrows():
+            orig_idx = row.name
+            
+            priv_val = str(row["Privado"]).strip().lower()
+            es_privada_bool = priv_val in ["true", "sí", "si", "1"]
+            icono = "🔒 " if es_privada_bool else "🏫 "
+            
+            f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
+            f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
+            
+            f_ini_fmt = formatear_fecha_corta(f_ini_raw)
+            f_fin_fmt = formatear_fecha_corta(f_fin_raw)
+            
+            if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
+                rango_fechas = f"📅 {f_ini_fmt}"
+            else:
+                rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt} (Rango Activo)"
+            
+            with st.container(border=True):
+                col_t1, col_t2, col_t3, col_t4 = st.columns([3, 1, 0.7, 0.7])
+                with col_t1:
+                    st.markdown(f"**{icono} {row['Actividad']}** &nbsp;|&nbsp; *<small>{rango_fechas}</small>*", unsafe_allow_html=True)
+                with col_t2:
+                    st.markdown("🟠 Pendiente", unsafe_allow_html=True)
+                with col_t3:
+                    if st.button("✔️ Marcar", key=f"btn_terminar_{orig_idx}"):
+                        # 1. Copiar a la hoja "Completadas"
+                        try:
+                            sheet_completadas = spreadsheet.worksheet("Completadas")
+                            sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
+                        except Exception:
+                            pass
+                        # 2. Borrar de la hoja principal
+                        sheet_principal.delete_rows(orig_idx + 2)
+                        st.success("¡Completada y movida al historial!")
+                        st.rerun()
+                with col_t4:
+                    if st.button("🗑️ Borrar", key=f"del_gestion_{orig_idx}"):
+                        # Borrar de principal
+                        sheet_principal.delete_rows(orig_idx + 2)
+                        # Intentar borrar también de "Completadas"
+                        try:
+                            sheet_comp = spreadsheet.worksheet("Completadas")
+                            registros_comp = sheet_comp.get_all_records()
+                            for i, r in enumerate(registros_comp):
+                                if str(r.get("Actividad")) == str(row["Actividad"]) and str(r.get("Fecha Inicio")) == str(row["Fecha Inicio"]):
+                                    sheet_comp.delete_rows(i + 2)
+                                    break
+                        except Exception:
+                            pass
+                        st.success("¡Eliminada por completo!")
+                        st.rerun()
     else:
         st.info("No hay actividades registradas.")
 
@@ -467,7 +501,7 @@ elif selected == "Dashboard de Zona":
     st.dataframe(df_avances, use_container_width=True, hide_index=True)
 
 
-# --- 3. SECCIÓN: TAREAS COMPLETADAS (DISEÑO VISUAL Y LLAMATIVO EN TARJETAS) ---
+# --- 3. SECCIÓN: TAREAS COMPLETADAS (TARJETAS VISUALES CON HISTORIAL Y BORRADO) ---
 elif selected == "Tareas Completadas":
     st.title("✅ Historial de Tareas Completadas")
     st.markdown("Visualiza por separado las actividades concluidas a nivel zona y las concluidas individualmente.")
@@ -493,16 +527,15 @@ elif selected == "Tareas Completadas":
             if data_completadas:
                 df_completadas_admin = pd.DataFrame(data_completadas)
                 
-                # Renderizado visual en tarjetas llamativas con diseño moderno
                 for idx, row in df_completadas_admin.iterrows():
-                    orig_idx_comp = idx + 2 # Fila real en Google Sheets (considerando cabecera)
+                    orig_idx_comp = idx + 2
                     actividad_nombre = row.get("Actividad", "Sin nombre")
                     f_ini = formatear_fecha_corta(str(row.get("Fecha Inicio", "")).split("T")[0])
                     f_fin = formatear_fecha_corta(str(row.get("Fecha Fin", "")).split("T")[0])
                     priv_raw = str(row.get("Privado", "False")).strip().lower()
                     es_priv = priv_raw in ["true", "sí", "si", "1"]
                     
-                    badge_privado = "🔒 Privada" if es_priv =="true" or es_priv else "🏫 General"
+                    badge_privado = "🔒 Privada" if es_priv else "🏫 General"
                     
                     with st.container(border=True):
                         col_card1, col_card2, col_card3 = st.columns([3, 1.5, 0.8])
