@@ -200,10 +200,13 @@ if selected == "Cronograma y Gestión":
                 es_privada_bool = priv_val in ["true", "sí", "si", "1"]
                 icono = "🔒 " if es_privada_bool else "🏫 "
                 
-                f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
-                f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
+                f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
+                f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
                 
-                if f_ini_fmt == f_fin_fmt:
+                f_ini_fmt = formatear_fecha_corta(f_ini_raw)
+                f_fin_fmt = formatear_fecha_corta(f_fin_raw)
+                
+                if f_ini_raw == f_fin_raw or not f_fin_raw:
                     rango_fechas = f"📅 {f_ini_fmt}"
                 else:
                     rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
@@ -226,7 +229,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (CON RANGO EXCLUSIVO PARA ARRASTRE CORRECTO) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -240,6 +243,7 @@ if selected == "Cronograma y Gestión":
             f_fin_val = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_val
             
             try:
+                # FullCalendar requiere que la fecha final sea exclusiva (sumar 1 día) para abarcar todo el rango visualmente
                 f_fin_dt = pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)
                 f_fin_ajustada = str(f_fin_dt).split()[0]
             except:
@@ -279,7 +283,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS (CON RANGO DE FECHAS CORREGIDO Y DD-MM-YY) ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
@@ -289,10 +293,13 @@ if selected == "Cronograma y Gestión":
             es_privada_bool = priv_val in ["true", "sí", "si", "1"]
             icono = "🔒 " if es_privada_bool else "🏫 "
             
-            f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
-            f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
+            f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
+            f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
             
-            if f_ini_fmt == f_fin_fmt:
+            f_ini_fmt = formatear_fecha_corta(f_ini_raw)
+            f_fin_fmt = formatear_fecha_corta(f_fin_raw)
+            
+            if f_ini_raw == f_fin_raw or not f_fin_raw:
                 rango_fechas = f"📅 {f_ini_fmt}"
             else:
                 rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
