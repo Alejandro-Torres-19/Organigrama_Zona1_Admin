@@ -113,7 +113,7 @@ df_tareas = cargar_datos_principales()
 # --- FUNCIÓN AUXILIAR PARA FORMATEAR FECHAS A DD-MM-YY ---
 def formatear_fecha_corta(fecha_str):
     try:
-        dt = pd.to_datetime(fecha_str)
+        dt = pd.to_datetime(fecha_str, dayfirst=True)
         return dt.strftime("%d-%m-%y")
     except:
         return str(fecha_str).split("T")[0]
@@ -151,10 +151,14 @@ with st.sidebar:
         submit_btn = st.form_submit_button("Guardar en Calendario")
         if submit_btn:
             if nom_actividad:
+                # Guardar directamente en formato DD-MM-YY en Google Sheets
+                f_ini_fmt_gs = f_inicio.strftime("%d-%m-%y")
+                f_fin_fmt_gs = f_fin.strftime("%d-%m-%y")
+                
                 nueva_fila = [
                     nom_actividad,
-                    str(f_inicio),
-                    str(f_fin),
+                    f_ini_fmt_gs,
+                    f_fin_fmt_gs,
                     es_privada,
                     "Pendiente",
                     color_actividad,
@@ -180,23 +184,24 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    hoy_str = date.today().strftime("%Y-%m-%d")
+    hoy_dt = pd.Timestamp(date.today()).normalize()
     
     if not df_tareas.empty:
-        df_tareas["Fecha_Inicio_Str"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.strftime("%Y-%m-%d")
-        df_tareas["Fecha_Fin_Str"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.strftime("%Y-%m-%d")
-        df_tareas["Fecha_Fin_Str"] = df_tareas["Fecha_Fin_Str"].fillna(df_tareas["Fecha_Inicio_Str"])
+        # Normalizar fechas para comparaciones robustas
+        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce', dayfirst=True)
+        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce', dayfirst=True)
+        df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
         
-        # 1. Bloque de Atrasadas (Fecha fin menor a hoy y no completadas)
+        # 1. Bloque de Atrasadas (Fecha fin anterior a hoy y no completadas)
         atrasadas_df = df_tareas[
-            (df_tareas["Fecha_Fin_Str"] < hoy_str) & 
+            (df_tareas["Fecha_Fin_dt"] < hoy_dt) & 
             (df_tareas["Estado"].str.lower() != "completada")
         ]
         
-        # 2. Bloque de Hoy (La fecha actual está dentro del rango inicio y fin)
+        # 2. Bloque de Hoy (La fecha actual se encuentra dentro del rango inicio y fin)
         hoy_df = df_tareas[
-            (df_tareas["Fecha_Inicio_Str"] <= hoy_str) & 
-            (df_tareas["Fecha_Fin_Str"] >= hoy_str) & 
+            (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & 
+            (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & 
             (df_tareas["Estado"].str.lower() != "completada")
         ]
 
@@ -208,12 +213,10 @@ if selected == "Cronograma y Gestión":
                 es_privada_bool = priv_val in ["true", "sí", "si", "1"]
                 icono = "🔒 " if es_privada_bool else "🏫 "
                 
-                f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-                f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-                f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-                f_fin_fmt = formatear_fecha_corta(f_fin_raw)
+                f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
+                f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
                 
-                if f_ini_raw == f_fin_raw or not f_fin_raw:
+                if f_ini_fmt == f_fin_fmt or not row["Fecha Fin"]:
                     rango_fechas = f"📅 {f_ini_fmt}"
                 else:
                     rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
@@ -242,12 +245,10 @@ if selected == "Cronograma y Gestión":
                 es_privada_bool = priv_val in ["true", "sí", "si", "1"]
                 icono = "🔒 " if es_privada_bool else "🏫 "
                 
-                f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-                f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-                f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-                f_fin_fmt = formatear_fecha_corta(f_fin_raw)
+                f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
+                f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
                 
-                if f_ini_raw == f_fin_raw or not f_fin_raw:
+                if f_ini_fmt == f_fin_fmt or not row["Fecha Fin"]:
                     rango_fechas = f"📅 {f_ini_fmt}"
                 else:
                     rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
@@ -270,7 +271,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO EN TODO EL RANGO) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -284,15 +285,17 @@ if selected == "Cronograma y Gestión":
             f_fin_val = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_val
             
             try:
-                # FullCalendar requiere que la fecha final sea exclusiva (sumar 1 día) para abarcar todo el rango visualmente
-                f_fin_dt = pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)
-                f_fin_ajustada = str(f_fin_dt).split()[0]
+                # FullCalendar requiere fecha final exclusiva (+1 día) para abarcar todo el rango visualmente
+                f_fin_dt = pd.to_datetime(f_fin_val, dayfirst=True) + pd.Timedelta(days=1)
+                f_fin_ajustada = f_fin_dt.strftime("%Y-%m-%d")
+                f_ini_dt_parsed = pd.to_datetime(f_ini_val, dayfirst=True).strftime("%Y-%m-%d")
             except:
+                f_ini_dt_parsed = f_ini_val
                 f_fin_ajustada = f_fin_val
 
             calendar_events.append({
                 "title": f"{icono_titulo}{row['Actividad']}",
-                "start": f_ini_val,
+                "start": f_ini_dt_parsed,
                 "end": f_fin_ajustada,
                 "color": row["Color"] if row["Color"] else "#3788d8",
                 "allDay": True
@@ -334,13 +337,10 @@ if selected == "Cronograma y Gestión":
             es_privada_bool = priv_val in ["true", "sí", "si", "1"]
             icono = "🔒 " if es_privada_bool else "🏫 "
             
-            f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-            f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
+            f_ini_fmt = formatear_fecha_corta(row["Fecha Inicio"])
+            f_fin_fmt = formatear_fecha_corta(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_fmt
             
-            f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-            f_fin_fmt = formatear_fecha_corta(f_fin_raw)
-            
-            if f_ini_raw == f_fin_raw or not f_fin_raw:
+            if f_ini_fmt == f_fin_fmt or not row["Fecha Fin"]:
                 rango_fechas = f"📅 {f_ini_fmt}"
             else:
                 rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
@@ -434,4 +434,5 @@ elif selected == "Tareas Completadas":
             else:
                 st.info("Aún no has marcado ninguna tarea como terminada individualmente.")
         else:
+            st.info("No hay registros disponibles.")
             st.info("No hay registros disponibles.")
