@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="Cronograma - Admin - Zona 1", page_icon="🏫", layout="wide"
 )
 
-# --- CONEXIÓN DIRECTA A GOOGLE SHEETS (SIN CACHÉ PARA FORZAR CAMBIOS) ---
+# --- CONEXIÓN DIRECTA A GOOGLE SHEETS ---
 def conectar_gspread():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -86,42 +86,25 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- CARGAR Y DEPURAR DATOS DE LA HOJA PRINCIPAL ---
+# --- CARGAR DATOS FRESCOS DE LA HOJA PRINCIPAL ---
 def cargar_datos_principales():
     data = sheet_principal.get_all_records()
     if not data:
-        df = pd.DataFrame(columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"])
+        df = pd.DataFrame(
+            columns=[
+                "Actividad",
+                "Fecha Inicio",
+                "Fecha Fin",
+                "Privado",
+                "Estado",
+                "Color",
+            ]
+        )
     else:
         df = pd.DataFrame(data)
-        # Limpiar nombres de columnas por espacios o mayúsculas
-        df.columns = [str(col).strip() for col in df.columns]
-        
-        # Mapeo de seguridad para Fecha Fin
-        if "Fecha FIn" in df.columns and "Fecha Fin" not in df.columns:
-        # Si existe Fecha FIn con i minúscula/mayúscula
-            pass # Ya lo manejamos abajo
-        
         for col in ["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]:
             if col not in df.columns:
-                # Buscar variaciones comunes
-                match = [c for c in df.columns if col.lower().replace(" ", "") in c.lower().replace(" ", "")]
-                if match:
-                    df.rename(columns={match[0]: col}, inplace=True)
-                else:
-                    df[col] = ""
-                    
-        # ASEGURAR QUE LAS FECHAS SE LEAN CORRECTAMENTE
-        df["Fecha Inicio"] = df["Fecha Inicio"].astype(str).str.split("T").str[0].str.strip()
-        
-        # Detectar columna de fin (puede venir como 'Fecha Fin', 'Fecha FIn', etc.)
-        col_fin_real = next((c for c in df.columns if "fin" in c.lower()), "Fecha Fin")
-        if col_fin_real != "Fecha Fin":
-            df.rename(columns={col_fin_real: "Fecha Fin"}, inplace=True)
-            
-        df["Fecha Fin"] = df["Fecha Fin"].astype(str).str.split("T").str[0].str.strip()
-        df["Fecha Fin"] = df["Fecha Fin"].replace(["", "nan", "NaT", "None"], pd.NA)
-        df["Fecha Fin"] = df["Fecha Fin"].fillna(df["Fecha Inicio"])
-        
+                df[col] = ""
     return df
 
 df_tareas = cargar_datos_principales()
@@ -201,22 +184,22 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    hoy_date_obj: date.today()
-    hoy_str = hoy_date_obj.strftime("%Y-%m-%d")    
+    hoy_date_obj = date.today()
+    hoy_str = hoy_date_obj.strftime("%Y-%m-%d")
+    hoy_dt = pd.Timestamp(hoy_date_obj).normalize()
     
     if not df_tareas.empty:
-        df_tareas["Fecha_Inicio_Puro"] = df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0].str.strip()
-        df_tareas["Fecha_Fin_Puro"] = df_tareas["Fecha Fin"].astype(str).str.split("T").str[0].str.strip()
-        df_tareas["Fecha_Fin_Puro"] = df_tareas["Fecha_Fin_Puro"].replace(["", "nan", "NaT", "None"], pd.NA)
-        df_tareas["Fecha_Fin_Puro"] = df_tareas["Fecha_Fin_Puro"].fillna(df_tareas["Fecha_Inicio_Puro"])
+        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
+        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
+        df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
         
-        # 1. Bloque de Atrasadas (Fecha fin estrictamente menor a hoy y no completadas)
+        # 1. Bloque de Atrasadas
         atrasadas_df = df_tareas[
             (df_tareas["Fecha_Fin_dt"] < hoy_dt) & 
             (df_tareas["Estado"].str.lower() != "completada")
         ]
         
-        # 2. Bloque de Hoy (La fecha actual está entre inicio y fin inclusive)
+        # 2. Bloque de Hoy (estricto)
         hoy_df = df_tareas[
             (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & 
             (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & 
@@ -293,8 +276,17 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-# --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (SIN "ALL-DAY") ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (SIN COLUMNA DE HORA) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
+
+    # CSS para ocultar la columna de hora en la vista de lista y ganar espacio total
+    st.markdown("""
+        <style>
+        .fc-list-event-time {
+            display: none !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     calendar_events = []
     if not df_tareas.empty:
@@ -308,7 +300,6 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
-                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
@@ -319,7 +310,7 @@ if selected == "Cronograma y Gestión":
                 "start": f_ini_dt,
                 "end": f_fin_dt,
                 "color": row["Color"] if row["Color"] else "#3788d8",
-                "allDay": False  # <--- Esto elimina la etiqueta "all-day" en la vista de agenda
+                "allDay": True
             })
 
     calendar_options = {
@@ -348,7 +339,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-   # --- SECCIÓN: GESTIÓN DE TAREAS (RANGO FORZADO) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
@@ -364,11 +355,10 @@ if selected == "Cronograma y Gestión":
             f_ini_fmt = formatear_fecha_corta(f_ini_raw)
             f_fin_fmt = formatear_fecha_corta(f_fin_raw)
             
-            # IMPRESIÓN FORZADA DEL RANGO PARA VERIFICACIÓN VISUAL
-            if f_ini_fmt != f_fin_fmt and f_fin_fmt != "":
-                rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt} (Rango Activo)"
-            else:
+            if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
                 rango_fechas = f"📅 {f_ini_fmt}"
+            else:
+                rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
             
             estado_actual = row["Estado"] if "Estado" in df_tareas.columns and row["Estado"] else "Pendiente"
             
