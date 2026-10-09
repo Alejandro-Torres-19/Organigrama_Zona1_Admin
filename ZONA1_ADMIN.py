@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Cronograma- Zona 1", page_icon="🏫", layout="wide"
+    page_title="Panel Maestro - Zona 1", page_icon="🏫", layout="wide"
 )
 
 # --- CREDENCIALES Y CONEXIÓN A GOOGLE SHEETS ---
@@ -38,7 +38,7 @@ except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
 
-# --- SEGURIDAD: LOGIN MAESTRO (DISEÑO MEJORADO Y AMIGABLE) ---
+# --- SEGURIDAD: LOGIN MAESTRO ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == "Taguch_77":
@@ -103,11 +103,15 @@ def cargar_datos_principales():
         )
     else:
         df = pd.DataFrame(data)
+        # Asegurar columnas mínimas para evitar KeyErrors
+        for col in ["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]:
+            if col not in df.columns:
+                df[col] = ""
     return df
 
 df_tareas = cargar_datos_principales()
 
-# --- BARRA LATERAL DE NAVEGACIÓN ---
+# --- BARRA LATERAL: NAVEGACIÓN Y REGISTRO DE TAREAS ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/school.png", width=80)
     st.title("Supervisión Zona 1")
@@ -120,27 +124,69 @@ with st.sidebar:
         menu_icon="pin-fill",
         default_index=0,
     )
+    
+    st.markdown("---")
+    st.subheader("➕ Registrar Actividad")
+    
+    # Formulario en la barra lateral como lo solicitaste
+    with st.form("form_nueva_actividad_sidebar"):
+        nom_actividad = st.text_input("Nombre de la Actividad")
+        es_privada = st.selectbox("¿Es una tarea privada?", ["No", "Sí"])
+        
+        f_inicio = st.date_input("Fecha de Inicio", value=date.today())
+        
+        solo_un_dia = st.checkbox("¿Actividad de un solo día?")
+        if solo_un_dia:
+            f_fin = f_inicio
+        else:
+            f_fin = st.date_input("Fecha de Fin", value=date.today())
+
+        # Selector de colores con sus funciones predefinidas
+        st.markdown("**Selecciona Color / Estado:**")
+        opciones_colores = {
+            "🟢 Verde (Completado / Zona al 100%)": "#28a745",
+            "🟡 Amarillo (Pendiente / En proceso)": "#ffc107",
+            "🟣 Morado (Especial / Institucional)": "#6f42c1",
+            "🔴 Rojo (Urgente / Retrasado)": "#dc3545",
+            "⚪ Gris (Inactivo / Opcional)": "#6c757d"
+        }
+        color_seleccionado_key = st.selectbox("Función / Color", list(opciones_colores.keys()))
+        color_actividad = opciones_colores[color_seleccionado_key]
+        
+        submit_btn = st.form_submit_button("Guardar en Calendario")
+        if submit_btn:
+            if nom_actividad:
+                nueva_fila = [
+                    nom_actividad,
+                    str(f_inicio),
+                    str(f_fin),
+                    es_privada,
+                    "Pendiente",
+                    color_actividad,
+                ]
+                sheet_principal.append_row(nueva_fila)
+                st.success("¡Registrada con éxito!")
+                st.rerun()
+            else:
+                st.warning("Ingresa el nombre de la actividad.")
 
 # --- 1. SECCIÓN: CRONOGRAMA Y GESTIÓN ---
 if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades (Maestro)")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY (CORREGIDA Y BLINDADA) ---
+    # --- SECCIÓN: PENDIENTES DE HOY ---
     st.markdown("### 🔔 Pendientes de Hoy")
     hoy_actual = date.today()
     
-    if not df_tareas.empty and "Fecha Inicio" in df_tareas.columns and "Fecha Fin" in df_tareas.columns:
-        # Limpieza y conversión segura de fechas para evitar errores si hay celdas vacías o mal formateadas
-        df_tareas["Fecha Inicio"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.date
-        df_tareas["Fecha Fin"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.date
-        
-        # Eliminar filas con fechas inválidas
-        df_tareas = df_tareas.dropna(subset=["Fecha Inicio", "Fecha Fin"])
+    if not df_tareas.empty:
+        # Conversión segura de fechas
+        df_tareas["Fecha Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.date
+        df_tareas["Fecha Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.date
         
         pendientes_hoy = df_tareas[
-            (df_tareas["Fecha Inicio"] <= hoy_actual) & 
-            (df_tareas["Fecha Fin"] >= hoy_actual)
+            (df_tareas["Fecha Inicio_dt"] <= hoy_actual) & 
+            (df_tareas["Fecha Fin_dt"] >= hoy_actual)
         ]
         
         if not pendientes_hoy.empty:
@@ -153,45 +199,7 @@ if selected == "Cronograma y Gestión":
         else:
             st.success("🎉 ¡Excelente! No hay actividades programadas para el día de hoy.")
     else:
-        st.info("No hay actividades registradas en el sistema o faltan columnas de fecha.")
-
-    st.markdown("---")
-
-    # --- FORMULARIO DE NUEVA ACTIVIDAD ---
-    with st.expander("➕ Registrar Nueva Actividad / Tarea", expanded=False):
-        with st.form("form_nueva_actividad"):
-            col1, col2 = st.columns(2)
-            with col1:
-                nom_actividad = st.text_input("Nombre de la Actividad")
-                es_privada = st.selectbox("¿Es una tarea privada?", ["No", "Sí"])
-            with col2:
-                f_inicio = st.date_input("Fecha de Inicio", value=date.today())
-                
-                solo_un_dia = st.checkbox("¿La actividad es de un solo día?")
-                if solo_un_dia:
-                    f_fin = f_inicio
-                    st.caption("Se asignará la misma fecha de inicio como cierre.")
-                else:
-                    f_fin = st.date_input("Fecha de Fin", value=date.today())
-
-            color_actividad = st.color_picker("Color en el Calendario", "#3788d8")
-            
-            submit_btn = st.form_submit_button("Guardar Actividad")
-            if submit_btn:
-                if nom_actividad:
-                    nueva_fila = [
-                        nom_actividad,
-                        str(f_inicio),
-                        str(f_fin),
-                        es_privada,
-                        "Pendiente",
-                        color_actividad,
-                    ]
-                    sheet_principal.append_row(nueva_fila)
-                    st.success("¡Actividad registrada exitosamente!")
-                    st.rerun()
-                else:
-                    st.warning("Por favor, ingresa al menos el nombre de la actividad.")
+        st.info("No hay actividades registradas en el sistema.")
 
     st.markdown("---")
 
@@ -201,16 +209,17 @@ if selected == "Cronograma y Gestión":
     calendar_events = []
     if not df_tareas.empty:
         for _, row in df_tareas.iterrows():
+            f_fin_val = row["Fecha Fin"] if row["Fecha Fin"] else row["Fecha Inicio"]
             try:
-                f_fin_ajustada = str(pd.to_datetime(row["Fecha Fin"]) + pd.Timedelta(days=1)).split()[0]
+                f_fin_ajustada = str(pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)).split()[0]
             except:
-                f_fin_ajustada = str(row["Fecha Fin"])
+                f_fin_ajustada = str(f_fin_val)
 
             calendar_events.append({
                 "title": f"{'🔒 ' if row['Privado']=='Sí' else '🏫 '}{row['Actividad']}",
                 "start": str(row["Fecha Inicio"]),
                 "end": f_fin_ajustada,
-                "color": row["Color"],
+                "color": row["Color"] if row["Color"] else "#3788d8",
                 "allDay": True
             })
 
@@ -235,15 +244,17 @@ if selected == "Cronograma y Gestión":
 
     calendar(events=calendar_events, options=calendar_options)
 
+    st.markdown("---")
+    st.subheader("📋 Listado General de Actividades Registradas")
+    st.dataframe(df_tareas[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]], use_container_width=True)
+
 
 # --- 2. SECCIÓN: DASHBOARD DE ZONA ---
 elif selected == "Dashboard de Zona":
     st.title("📊 Dashboard Ejecutivo de Avance por Escuela")
     st.markdown("Monitoreo en tiempo real del cumplimiento de las 12 escuelas de la Zona 1.")
 
-    nombres_escuelas = [f"Escuela {i}" for i in range(1, 13)]
     avances_data = []
-    
     for i in range(1, 13):
         nombre_pestana = f"Escuela_{i}"
         try:
@@ -270,7 +281,6 @@ elif selected == "Dashboard de Zona":
     st.metric(label="📈 Avance Global Promedio de la Zona 1", value=f"{promedio_zona}%")
 
     st.markdown("---")
-    
     st.markdown("### Porcentaje de Avance Individual por Escuela")
     st.bar_chart(df_avances.set_index("Escuela"), horizontal=True)
 
