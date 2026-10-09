@@ -276,17 +276,8 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (SIN COLUMNA DE HORA) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE EN TODO EL RANGO) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
-
-    # CSS para ocultar la columna de hora en la vista de lista y ganar espacio total
-    st.markdown("""
-        <style>
-        .fc-list-event-time {
-            display: none !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
     calendar_events = []
     if not df_tareas.empty:
@@ -300,6 +291,7 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
+                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
@@ -339,7 +331,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS (MOSTRANDO EL RANGO COMPLETO) ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
