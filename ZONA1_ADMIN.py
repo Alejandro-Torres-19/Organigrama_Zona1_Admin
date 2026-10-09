@@ -122,7 +122,6 @@ with st.sidebar:
         nom_actividad = st.text_input("Nombre de la Actividad")
         es_privada = st.selectbox("¿Es una tarea privada?", ["No", "Sí"])
         
-        # Formato de fecha en DD/MM/YYYY
         f_inicio = st.date_input("Fecha de Inicio", value=date.today(), format="DD/MM/YYYY")
         
         solo_un_dia = st.checkbox("¿Actividad de un solo día?")
@@ -131,7 +130,6 @@ with st.sidebar:
         else:
             f_fin = st.date_input("Fecha de Fin", value=date.today(), format="DD/MM/YYYY")
 
-        # Colores disponibles (Azul predeterminado y Gris extra, sin verde)
         st.markdown("**Selecciona Color / Estado:**")
         opciones_colores = {
             "🔵 Azul (Predeterminado)": "#3788d8",
@@ -176,19 +174,18 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY ---
+    # --- SECCIÓN: PENDIENTES DE HOY (CORREGIDA Y ROBUSTA) ---
     st.markdown("### 🔔 Pendientes de Hoy")
-    hoy_actual = pd.Timestamp(date.today()).normalize()
+    hoy_str = date.today().strftime("%Y-%m-%d")
     
     if not df_tareas.empty:
-        df_tareas["Fecha Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce')
-        df_tareas["Fecha Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce')
+        # Extracción y limpieza segura comparando como texto Y fecha
+        df_tareas["Fecha_Inicio_Str"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.strftime("%Y-%m-%d")
+        df_tareas["Fecha_Fin_Str"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.strftime("%Y-%m-%d")
         
-        df_validas = df_tareas.dropna(subset=["Fecha Inicio_dt", "Fecha Fin_dt"])
-        
-        pendientes_hoy = df_validas[
-            (df_validas["Fecha Inicio_dt"] <= hoy_actual) & 
-            (df_validas["Fecha Fin_dt"] >= hoy_actual)
+        pendientes_hoy = df_tareas[
+            (df_tareas["Fecha_Inicio_Str"] <= hoy_str) & 
+            (df_tareas["Fecha_Fin_Str"] >= hoy_str)
         ]
         
         if not pendientes_hoy.empty:
@@ -196,12 +193,40 @@ if selected == "Cronograma y Gestión":
             for idx, row in pendientes_hoy.iterrows():
                 col_idx = idx % len(cols_hoy)
                 with cols_hoy[col_idx]:
-                    tipo = "🔒 Privada" if row["Privado"] == "Sí" else "🏫 General"
+                    priv_val = str(row["Privado"]).strip().lower()
+                    es_privada_bool = priv_val in ["true", "sí", "si", "1"]
+                    tipo = "🔒 Privada" if es_privada_bool else "🏫 General"
                     st.info(f"**{row['Actividad']}**\n\n*Tipo:* {tipo}\n*Vigencia:* {row['Fecha Inicio']} al {row['Fecha Fin']}")
         else:
             st.success("🎉 ¡Excelente! No hay actividades programadas para el día de hoy.")
     else:
         st.info("No hay actividades registradas en el sistema.")
+
+    st.markdown("---")
+
+    # --- SECCIÓN: GESTIÓN DE TAREAS (MARCAR COMO TERMINADAS POR EL ADMIN) ---
+    st.markdown("### 📋 Gestión y Control de Actividades Individuales")
+    st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
+
+    if not df_tareas.empty:
+        for idx, row in df_tareas.iterrows():
+            col_t1, col_t2, col_t3 = st.columns([3, 1, 1])
+            with col_t1:
+                priv_val = str(row["Privado"]).strip().lower()
+                es_privada_bool = priv_val in ["true", "sí", "si", "1"]
+                 icono = "🔒 " if es_privada_bool else "🏫 "
+                st.write(f"{icono} **{row['Actividad']}** (Del {row['Fecha Inicio']} al {row['Fecha Fin']})")
+            with col_t2:
+                estado_actual = row["Estado"] if "Estado" in df_tareas.columns else "Pendiente"
+                st.write(f"Estado: *{estado_actual}*")
+            with col_t3:
+                if st.button("Marcar Terminada", key=f"btn_terminar_{idx}"):
+                    # Actualizar en Google Sheets (fila index + 2 por el encabezado)
+                    sheet_principal.update_cell(idx + 2, 5, "Completada") # Columna 5: Estado
+                    st.success(f"¡Actividad '{row['Actividad']}' marcada como completada!")
+                    st.rerun()
+    else:
+        st.info("No hay actividades en la lista.")
 
     st.markdown("---")
 
@@ -211,6 +236,10 @@ if selected == "Cronograma y Gestión":
     calendar_events = []
     if not df_tareas.empty:
         for _, row in df_tareas.iterrows():
+            priv_val = str(row["Privado"]).strip().lower()
+            es_privada_bool = priv_val in ["true", "sí", "si", "1"]
+            icono_titulo = "🔒 " if es_privada_bool else "🏫 "
+            
             f_fin_val = row["Fecha Fin"] if row["Fecha Fin"] else row["Fecha Inicio"]
             try:
                 f_fin_ajustada = str(pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)).split()[0]
@@ -218,7 +247,7 @@ if selected == "Cronograma y Gestión":
                 f_fin_ajustada = str(f_fin_val)
 
             calendar_events.append({
-                "title": f"{'🔒 ' if row['Privado']=='Sí' else '🏫 '}{row['Actividad']}",
+                "title": f"{icono_titulo}{row['Actividad']}",
                 "start": str(row["Fecha Inicio"]),
                 "end": f_fin_ajustada,
                 "color": row["Color"] if row["Color"] else "#3788d8",
@@ -245,10 +274,6 @@ if selected == "Cronograma y Gestión":
     }
 
     calendar(events=calendar_events, options=calendar_options)
-
-    st.markdown("---")
-    st.subheader("📋 Listado General de Actividades Registradas")
-    st.dataframe(df_tareas[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado"]], use_container_width=True)
 
 
 # --- 2. SECCIÓN: DASHBOARD DE ZONA ---
@@ -292,14 +317,30 @@ elif selected == "Dashboard de Zona":
 
 # --- 3. SECCIÓN: TAREAS COMPLETADAS ---
 elif selected == "Tareas Completadas":
-    st.title("✅ Historial de Tareas Completadas a Nivel Zona")
-    st.markdown("Listado de actividades que han cumplido con el 100% de aprobación de las 12 escuelas.")
+    st.title("✅ Historial de Tareas Completadas")
+    st.markdown("Visualiza por separado las actividades concluidas a nivel zona y las concluidas individualmente.")
 
-    if not df_tareas.empty and "Estado" in df_tareas.columns:
-        completadas_global = df_tareas[df_tareas["Estado"] == "Completada"]
-        if not completadas_global.empty:
-            st.dataframe(completadas_global, use_container_width=True)
+    tab_zona, tab_admin = st.tabs(["🌍 Completadas a Nivel Zona (100% Escuelas)", "👤 Completadas Individualmente (Admin)"])
+
+    with tab_zona:
+        st.subheader("Tareas con 100% de Cumplimiento en la Zona")
+        if not df_tareas.empty and "Estado" in df_tareas.columns:
+            # Aquí puedes filtrar las que tengan el estado global de zona completado
+            completadas_zona = df_tareas[df_tareas["Estado"] == "Completada Global"]
+            if not completadas_zona.empty:
+                st.dataframe(completadas_zona[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True)
+            else:
+                st.info("Aún no hay actividades completadas por el 100% de las escuelas en la zona.")
         else:
-            st.info("Aún no hay actividades completadas por el 100% de las escuelas en la zona.")
-    else:
-        st.info("No hay registros en el sistema.")
+            st.info("No hay registros disponibles.")
+
+    with tab_admin:
+        st.subheader("Tareas Marcadas como Terminadas por el Administrador")
+        if not df_tareas.empty and "Estado" in df_tareas.columns:
+            completadas_admin = df_tareas[df_tareas["Estado"] == "Completada"]
+            if not completadas_admin.empty:
+                st.dataframe(completadas_admin[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True)
+            else:
+                st.info("Aún no has marcado ninguna tarea como terminada individualmente.")
+        else:
+            st.info("No hay registros disponibles.")
