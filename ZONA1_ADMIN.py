@@ -86,25 +86,39 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- CARGAR DATOS DE LA HOJA PRINCIPAL ---
+# --- CARGAR Y DEPURAR DATOS DE LA HOJA PRINCIPAL (BASE ORIGINAL RESTAURADA) ---
 def cargar_datos_principales():
     data = sheet_principal.get_all_records()
     if not data:
-        df = pd.DataFrame(
-            columns=[
-                "Actividad",
-                "Fecha Inicio",
-                "Fecha Fin",
-                "Privado",
-                "Estado",
-                "Color",
-            ]
-        )
+        df = pd.DataFrame(columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"])
     else:
         df = pd.DataFrame(data)
+        # Limpiar nombres de columnas por espacios o mayúsculas
+        df.columns = [str(col).strip() for col in df.columns]
+        
+        # Mapeo de seguridad para Fecha Fin
+        if "Fecha FIn" in df.columns and "Fecha Fin" not in df.columns:
+            pass
+        
         for col in ["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]:
             if col not in df.columns:
-                df[col] = ""
+                match = [c for c in df.columns if col.lower().replace(" ", "") in c.lower().replace(" ", "")]
+                if match:
+                    df.rename(columns={match[0]: col}, inplace=True)
+                else:
+                    df[col] = ""
+                    
+        # ASEGURAR QUE LAS FECHAS SE LEAN CORRECTAMENTE
+        df["Fecha Inicio"] = df["Fecha Inicio"].astype(str).str.split("T").str[0].str.strip()
+        
+        col_fin_real = next((c for c in df.columns if "fin" in c.lower()), "Fecha Fin")
+        if col_fin_real != "Fecha Fin":
+            df.rename(columns={col_fin_real: "Fecha Fin"}, inplace=True)
+            
+        df["Fecha Fin"] = df["Fecha Fin"].astype(str).str.split("T").str[0].str.strip()
+        df["Fecha Fin"] = df["Fecha Fin"].replace(["", "nan", "NaT", "None"], pd.NA)
+        df["Fecha Fin"] = df["Fecha Fin"].fillna(df["Fecha Inicio"])
+        
     return df
 
 df_tareas = cargar_datos_principales()
@@ -276,10 +290,10 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (AMPLIADO VERTICALMENTE Y SIN HORA) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO, VERTICAL Y SIN HORA) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
-    # CSS para ocultar la hora y hacer más alto el calendario verticalmente
+    # CSS para ocultar la hora y ampliar verticalmente el calendario
     st.markdown("""
         <style>
         .fc-list-event-time {
@@ -308,7 +322,7 @@ if selected == "Cronograma y Gestión":
                 f_ini_dt = f_ini_raw
                 f_fin_dt = f_fin_raw
 
-            # Color dinámico: Si es privada y está completada, se pinta de verde
+            # Lógica solicitada: Si es privada y está completada, se pinta de verde
             estado_evt = str(row["Estado"]).strip().lower()
             if es_privada_bool and estado_evt == "completada":
                 color_evento = "#28a745"  # Verde institucional
@@ -349,17 +363,16 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS (OCULTA LAS LISTAS PARA LIBERAR ESPACIO) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS (OCULTA LAS LISTAS Y MUESTRA RANGOS COMPLETOS) ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
     if not df_tareas.empty:
-        # Filtrar solo las tareas que NO están completadas para que se oculten al marcar "Lista"
+        # Filtrar para ocultar las que ya están completadas / listas
         pendientes_gestion = df_tareas[df_tareas["Estado"].str.lower() != "completada"]
         
         if not pendientes_gestion.empty:
             for idx, row in pendientes_gestion.iterrows():
-                # Encontrar el índice original en el df completo para actualizar correctamente la celda
                 orig_idx = row.name
                 
                 priv_val = str(row["Privado"]).strip().lower()
@@ -385,7 +398,6 @@ if selected == "Cronograma y Gestión":
                         st.markdown("🟠 Pendiente", unsafe_allow_html=True)
                     with col_t3:
                         if st.button("✔️ Marcar", key=f"btn_terminar_{orig_idx}"):
-                            # Actualiza a "Completada" en Google Sheets (columna 5 / 'Estado')
                             sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
                             st.success("¡Completada!")
                             st.rerun()
