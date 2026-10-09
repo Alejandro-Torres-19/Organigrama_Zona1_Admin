@@ -291,7 +291,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE EN TODO EL RANGO VISUAL) ---
+# --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (SIN "ALL-DAY") ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -306,7 +306,7 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
-                # FullCalendar requiere fecha final exclusiva (+1 día) para abarcar todo el rango visualmente
+                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
@@ -317,7 +317,7 @@ if selected == "Cronograma y Gestión":
                 "start": f_ini_dt,
                 "end": f_fin_dt,
                 "color": row["Color"] if row["Color"] else "#3788d8",
-                "allDay": True
+                "allDay": False  # <--- Esto elimina la etiqueta "all-day" en la vista de agenda
             })
 
     calendar_options = {
