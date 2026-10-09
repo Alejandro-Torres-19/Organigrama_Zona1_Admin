@@ -1,5 +1,6 @@
 streamlit
-gspread
-oauth2client
 pandas
+streamlit-option-menu
 streamlit-calendar
+gspread
+google-auth
