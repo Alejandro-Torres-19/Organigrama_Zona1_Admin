@@ -115,7 +115,7 @@ def formatear_fecha_corta(fecha_val):
     if not fecha_val or str(fecha_val).strip() == "":
         return ""
     try:
-        dt = pd.to_datetime(fecha_str := str(fecha_val).split("T")[0])
+        dt = pd.to_datetime(str(fecha_val).split("T")[0])
         return dt.strftime("%d-%m-%y")
     except:
         return str(fecha_val).split("T")[0]
@@ -153,10 +153,13 @@ with st.sidebar:
         submit_btn = st.form_submit_button("Guardar en Calendario")
         if submit_btn:
             if nom_actividad:
+                f_ini_fmt_gs = f_inicio.strftime("%Y-%m-%d")
+                f_fin_fmt_gs = f_fin.strftime("%Y-%m-%d")
+                
                 nueva_fila = [
                     nom_actividad,
-                    str(f_inicio),
-                    str(f_fin),
+                    f_ini_fmt_gs,
+                    f_fin_fmt_gs,
                     es_privada,
                     "Pendiente",
                     color_actividad,
@@ -183,19 +186,20 @@ if selected == "Cronograma y Gestión":
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
     hoy_dt = pd.Timestamp(date.today()).normalize()
+    hoy_str = hoy_dt.strftime("%Y-%m-%d")
     
     if not df_tareas.empty:
         df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce')
         df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce')
         df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
         
-        # 1. Bloque de Atrasadas (Fecha fin anterior a hoy y no completadas)
+        # 1. Bloque de Atrasadas (Fecha fin estrictamente menor a hoy y no completadas)
         atrasadas_df = df_tareas[
             (df_tareas["Fecha_Fin_dt"] < hoy_dt) & 
             (df_tareas["Estado"].str.lower() != "completada")
         ]
         
-        # 2. Bloque de Hoy (La fecha actual se encuentra dentro del rango inicio y fin)
+        # 2. Bloque de Hoy (La fecha de hoy está entre inicio y fin inclusive)
         hoy_df = df_tareas[
             (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & 
             (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & 
@@ -272,7 +276,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE EN TODO EL RANGO) ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO EN TODO EL RANGO) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -287,7 +291,7 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
-                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar correctamente todo el rango visualmente
+                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
@@ -327,7 +331,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS (CON RANGO COMPLETO Y DD-MM-YY) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS (MOSTRANDO EL RANGO COMPLETO) ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
