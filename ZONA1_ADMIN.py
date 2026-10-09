@@ -8,16 +8,6 @@ from google.oauth2.service_account import Credentials
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    from datetime import datetime, time, date
-import streamlit as st
-import pandas as pd
-from streamlit_option_menu import option_menu
-from streamlit_calendar import calendar
-import gspread
-from google.oauth2.service_account import Credentials
-
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(
     page_title="Cronograma - Admin - Zona 1", page_icon="🏫", layout="wide"
 )
 
