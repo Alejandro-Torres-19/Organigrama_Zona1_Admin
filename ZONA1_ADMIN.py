@@ -172,21 +172,20 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    # --- SECCIÓN: PENDIENTES DE HOY (CORREGIDA Y PRECISA) ---
-    st.markdown("### 🔔 Pendientes de Hoy")
+    # --- SECCIÓN: PENDIENTES DE HOY Y ATRASADAS ---
+    st.markdown("### 🔔 Pendientes de Hoy y Atrasadas")
     hoy_str = date.today().strftime("%Y-%m-%d")
     
     if not df_tareas.empty:
-        # Extraer solo la parte YYYY-MM-DD para comparar de manera exacta independientemente de la hora
         df_tareas["Fecha_Inicio_Str"] = pd.to_datetime(df_tareas["Fecha Inicio"], errors='coerce').dt.strftime("%Y-%m-%d")
         df_tareas["Fecha_Fin_Str"] = pd.to_datetime(df_tareas["Fecha Fin"], errors='coerce').dt.strftime("%Y-%m-%d")
-        
-        # Si la fecha fin está vacía, usar la fecha de inicio
         df_tareas["Fecha_Fin_Str"] = df_tareas["Fecha_Fin_Str"].fillna(df_tareas["Fecha_Inicio_Str"])
         
+        # Filtrar tareas pendientes que sean de hoy o atrasadas (cuya fecha fin sea menor o igual a hoy y no estén completadas)
         pendientes_hoy = df_tareas[
-            (df_tareas["Fecha_Inicio_Str"] <= hoy_str) & 
-            (df_tareas["Fecha_Fin_Str"] >= hoy_str)
+            (df_tareas["Fecha_Fin_Str"] >= hoy_str) & 
+            (df_tareas["Fecha_Inicio_Str"] <= hoy_str) &
+            (df_tareas["Estado"].str.lower() != "completada")
         ]
         
         if not pendientes_hoy.empty:
@@ -198,20 +197,19 @@ if selected == "Cronograma y Gestión":
                     es_privada_bool = priv_val in ["true", "sí", "si", "1"]
                     tipo = "🔒 Privada" if es_privada_bool else "🏫 General"
                     
-                    # Formatear fechas para mostrar limpio
                     f_ini_fmt = str(row["Fecha Inicio"]).split("T")[0]
-                    f_fin_fmt = str(row["Fecha Fin"]).split("T")[0]
+                    f_fin_fmt = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_fmt
                     vigencia = f"{f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"del {f_ini_fmt} al {f_fin_fmt}"
                     
                     st.info(f"**{row['Actividad']}**\n\n*Tipo:* {tipo}\n*Vigencia:* {vigencia}")
         else:
-            st.success("🎉 ¡Excelente! No hay actividades programadas para el día de hoy.")
+            st.success("🎉 ¡Excelente! No hay actividades pendientes para el día de hoy.")
     else:
         st.info("No hay actividades registradas en el sistema.")
 
     st.markdown("---")
 
-    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
+    # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO CORRECTAMENTE) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
     calendar_events = []
@@ -225,8 +223,9 @@ if selected == "Cronograma y Gestión":
             f_fin_val = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_val
             
             try:
-                # FullCalendar requiere que la fecha 'end' sea exclusiva para abarcar todo el día final
-                f_fin_ajustada = str(pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)).split()[0]
+                # FullCalendar requiere que la fecha 'end' sea exclusiva sumando 1 día para abarcar todo el rango
+                f_fin_dt = pd.to_datetime(f_fin_val) + pd.Timedelta(days=1)
+                f_fin_ajustada = str(f_fin_dt).split()[0]
             except:
                 f_fin_ajustada = f_fin_val
 
@@ -251,6 +250,9 @@ if selected == "Cronograma y Gestión":
                 "type": "list",
                 "duration": {"days": 15},
                 "buttonText": "Agenda Quincenal"
+            },
+            "dayGridMonth": {
+                "buttonText": "mes"
             }
         },
         "initialView": "listFortnight",
@@ -261,7 +263,7 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS (DEBAJO DEL CALENDARIO) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS (ESTILO TABLA LIMPIA DEBAJO DEL CALENDARIO) ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
@@ -273,7 +275,7 @@ if selected == "Cronograma y Gestión":
             
             f_ini_fmt = str(row["Fecha Inicio"]).split("T")[0]
             f_fin_fmt = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_fmt
-            rango_fechas = f"({f_ini_fmt})" if f_ini_fmt == f_fin_fmt else f"(Del {f_ini_fmt} al {f_fin_fmt})"
+            rango_fechas = f"📅 {f_ini_fmt}" if f_ini_fmt == f_fin_fmt else f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
             
             estado_actual = row["Estado"] if "Estado" in df_tareas.columns and row["Estado"] else "Pendiente"
             
