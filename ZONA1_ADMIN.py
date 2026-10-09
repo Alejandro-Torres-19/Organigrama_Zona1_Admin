@@ -188,7 +188,6 @@ if selected == "Cronograma y Gestión":
     hoy_dt = pd.Timestamp(date.today()).normalize()
     
     if not df_tareas.empty:
-        # Parseo exacto de fechas normalizadas a medianoche para evitar desajustes
         df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
         df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
         df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
@@ -291,7 +290,7 @@ if selected == "Cronograma y Gestión":
             
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
-                # FullCalendar requiere fecha fin exclusiva (+1 día) para abarcar todo el rango visualmente en la cuadrícula
+                # FullCalendar requiere que la fecha final sea exclusiva (+1 día) para estirarse por todo el rango de días en la vista mes
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             except:
                 f_ini_dt = f_ini_raw
