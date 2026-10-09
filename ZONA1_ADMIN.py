@@ -32,7 +32,7 @@ def conectar_gspread():
 
 try:
     spreadsheet = conectar_gspread()
-    sheet_principal = spreadsheet.get_worksheet(0) # Pestaña 1: General
+    sheet_principal = spreadsheet.get_worksheet(0) # Pestaña 1: General (Hoja 1)
 except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
@@ -86,19 +86,14 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- CARGAR Y DEPURAR DATOS DE LA HOJA PRINCIPAL (BASE ORIGINAL RESTAURADA) ---
+# --- CARGAR Y DEPURAR DATOS DE LA HOJA PRINCIPAL ---
 def cargar_datos_principales():
     data = sheet_principal.get_all_records()
     if not data:
         df = pd.DataFrame(columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"])
     else:
         df = pd.DataFrame(data)
-        # Limpiar nombres de columnas por espacios o mayúsculas
         df.columns = [str(col).strip() for col in df.columns]
-        
-        # Mapeo de seguridad para Fecha Fin
-        if "Fecha FIn" in df.columns and "Fecha Fin" not in df.columns:
-            pass
         
         for col in ["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]:
             if col not in df.columns:
@@ -108,7 +103,6 @@ def cargar_datos_principales():
                 else:
                     df[col] = ""
                     
-        # ASEGURAR QUE LAS FECHAS SE LEAN CORRECTAMENTE
         df["Fecha Inicio"] = df["Fecha Inicio"].astype(str).str.split("T").str[0].str.strip()
         
         col_fin_real = next((c for c in df.columns if "fin" in c.lower()), "Fecha Fin")
@@ -133,7 +127,7 @@ def formatear_fecha_corta(fecha_val):
     except:
         return str(fecha_val).split("T")[0]
 
-# --- BARRA LATERAL: REGISTRO DE ACTIVIDADES (ARRIBA) Y NAVEGACIÓN (ABAJO) ---
+# --- BARRA LATERAL: REGISTRO DE ACTIVIDADES Y NAVEGACIÓN ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/school.png", width=80)
     st.title("Supervisión Zona 1")
@@ -207,13 +201,11 @@ if selected == "Cronograma y Gestión":
         df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
         df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
         
-        # 1. Bloque de Atrasadas
         atrasadas_df = df_tareas[
             (df_tareas["Fecha_Fin_dt"] < hoy_dt) & 
             (df_tareas["Estado"].str.lower() != "completada")
         ]
         
-        # 2. Bloque de Hoy (estricto)
         hoy_df = df_tareas[
             (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & 
             (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & 
@@ -224,6 +216,7 @@ if selected == "Cronograma y Gestión":
         st.markdown("### ⚠️ Actividades Atrasadas")
         if not atrasadas_df.empty:
             for idx, row in atrasadas_df.iterrows():
+                orig_idx = row.name
                 priv_val = str(row["Privado"]).strip().lower()
                 es_privada_bool = priv_val in ["true", "sí", "si", "1"]
                 icono = "🔒 " if es_privada_bool else "🏫 "
@@ -245,9 +238,16 @@ if selected == "Cronograma y Gestión":
                     with col_p2:
                         st.markdown("🔴 Atrasada", unsafe_allow_html=True)
                     with col_p3:
-                        if st.button("✔️ Marcar", key=f"btn_atrasada_{idx}"):
-                            sheet_principal.update_cell(idx + 2, 5, "Completada")
-                            st.success("¡Completada!")
+                        if st.button("✔️ Marcar", key=f"btn_atrasada_{orig_idx}"):
+                            sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
+                            # Copiar automáticamente a la pestaña "Completadas"
+                            try:
+                                sheet_completadas = spreadsheet.worksheet("Completadas")
+                                fila_a_copiar = [row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]]
+                                sheet_completadas.append_row(fila_a_copiar)
+                            except Exception:
+                                pass
+                            st.success("¡Completada y guardada en historial!")
                             st.rerun()
         else:
             st.success("🎉 ¡Excelente! No tienes actividades atrasadas.")
@@ -258,6 +258,7 @@ if selected == "Cronograma y Gestión":
         st.markdown("### 🔔 Pendientes de Hoy")
         if not hoy_df.empty:
             for idx, row in hoy_df.iterrows():
+                orig_idx = row.name
                 priv_val = str(row["Privado"]).strip().lower()
                 es_privada_bool = priv_val in ["true", "sí", "si", "1"]
                 icono = "🔒 " if es_privada_bool else "🏫 "
@@ -279,9 +280,16 @@ if selected == "Cronograma y Gestión":
                     with col_h2:
                         st.markdown("🟠 Pendiente", unsafe_allow_html=True)
                     with col_h3:
-                        if st.button("✔️ Marcar", key=f"btn_hoy_{idx}"):
-                            sheet_principal.update_cell(idx + 2, 5, "Completada")
-                            st.success("¡Completada!")
+                        if st.button("✔️ Marcar", key=f"btn_hoy_{orig_idx}"):
+                            sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
+                            # Copiar automáticamente a la pestaña "Completadas"
+                            try:
+                                sheet_completadas = spreadsheet.worksheet("Completadas")
+                                fila_a_copiar = [row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]]
+                                sheet_completadas.append_row(fila_a_copiar)
+                            except Exception:
+                                pass
+                            st.success("¡Completada y guardada en historial!")
                             st.rerun()
         else:
             st.success("🎉 ¡Excelente! No hay actividades programadas específicamente para el día de hoy.")
@@ -293,7 +301,6 @@ if selected == "Cronograma y Gestión":
     # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL (EXTENDIDO, VERTICAL Y SIN HORA) ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
-    # CSS para ocultar la hora y ampliar verticalmente el calendario
     st.markdown("""
         <style>
         .fc-list-event-time {
@@ -322,7 +329,6 @@ if selected == "Cronograma y Gestión":
                 f_ini_dt = f_ini_raw
                 f_fin_dt = f_fin_raw
 
-            # Lógica solicitada: Si es privada y está completada, se pinta de verde
             estado_evt = str(row["Estado"]).strip().lower()
             if es_privada_bool and estado_evt == "completada":
                 color_evento = "#28a745"  # Verde institucional
@@ -363,12 +369,11 @@ if selected == "Cronograma y Gestión":
 
     st.markdown("---")
 
-    # --- SECCIÓN: GESTIÓN DE TAREAS (OCULTA LAS LISTAS Y MUESTRA RANGOS COMPLETOS) ---
+    # --- SECCIÓN: GESTIÓN DE TAREAS ---
     st.markdown("### 📋 Gestión y Control de Actividades Individuales")
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
     if not df_tareas.empty:
-        # Filtrar para ocultar las que ya están completadas / listas
         pendientes_gestion = df_tareas[df_tareas["Estado"].str.lower() != "completada"]
         
         if not pendientes_gestion.empty:
@@ -398,8 +403,16 @@ if selected == "Cronograma y Gestión":
                         st.markdown("🟠 Pendiente", unsafe_allow_html=True)
                     with col_t3:
                         if st.button("✔️ Marcar", key=f"btn_terminar_{orig_idx}"):
+                            # 1. Actualiza celda en la hoja principal
                             sheet_principal.update_cell(orig_idx + 2, 5, "Completada")
-                            st.success("¡Completada!")
+                            # 2. Copia automática a la pestaña "Completadas" en Google Sheets
+                            try:
+                                sheet_completadas = spreadsheet.worksheet("Completadas")
+                                fila_a_copiar = [row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]]
+                                sheet_completadas.append_row(fila_a_copiar)
+                            except Exception:
+                                pass
+                            st.success("¡Completada y guardada en Google Sheets!")
                             st.rerun()
         else:
             st.success("🎉 ¡Excelente! No tienes actividades pendientes de gestión individual.")
@@ -443,10 +456,10 @@ elif selected == "Dashboard de Zona":
     st.bar_chart(df_avances.set_index("Escuela"), horizontal=True)
 
     st.markdown("### Detalle Tabular")
-    st.dataframe(df_avances, use_container_width=True)
+    st.dataframe(df_avances, use_container_width=True, hide_index=True)
 
 
-# --- 3. SECCIÓN: TAREAS COMPLETADAS ---
+# --- 3. SECCIÓN: TAREAS COMPLETADAS (TABLAS LIMPIAS Y SIN ÍNDICES) ---
 elif selected == "Tareas Completadas":
     st.title("✅ Historial de Tareas Completadas")
     st.markdown("Visualiza por separado las actividades concluidas a nivel zona y las concluidas individualmente.")
@@ -458,7 +471,7 @@ elif selected == "Tareas Completadas":
         if not df_tareas.empty and "Estado" in df_tareas.columns:
             completadas_zona = df_tareas[df_tareas["Estado"] == "Completada Global"]
             if not completadas_zona.empty:
-                st.dataframe(completadas_zona[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True)
+                st.dataframe(completadas_zona[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True, hide_index=True)
             else:
                 st.info("Aún no hay actividades completadas por el 100% de las escuelas en la zona.")
         else:
@@ -466,11 +479,20 @@ elif selected == "Tareas Completadas":
 
     with tab_admin:
         st.subheader("Tareas Marcadas como Terminadas por el Administrador")
-        if not df_tareas.empty and "Estado" in df_tareas.columns:
+        # Cargamos directamente los registros de la pestaña "Completadas" de Google Sheets
+        try:
+            sheet_completadas = spreadsheet.worksheet("Completadas")
+            data_completadas = sheet_completadas.get_all_records()
+            if data_completadas:
+                df_completadas_admin = pd.DataFrame(data_completadas)
+                # Mostramos la tabla limpia, sin índices y con diseño profesional
+                st.dataframe(df_completadas_admin[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True, hide_index=True)
+            else:
+                st.info("Aún no hay registros en la hoja de completadas.")
+        except Exception:
+            # Fallback por si la pestaña no existe aún
             completadas_admin = df_tareas[df_tareas["Estado"].str.lower() == "completada"]
             if not completadas_admin.empty:
-                st.dataframe(completadas_admin[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True)
+                st.dataframe(completadas_admin[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True, hide_index=True)
             else:
                 st.info("Aún no has marcado ninguna tarea como terminada individualmente.")
-        else:
-            st.info("No hay registros disponibles.")
