@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 from streamlit_option_menu import option_menu
 from streamlit_calendar import calendar
+import plotly.graph_objects as go
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -127,6 +128,31 @@ def formatear_fecha_corta(fecha_val):
     except:
         return str(fecha_val).split("T")[0]
 
+# --- FUNCIÓN PARA GENERAR GRÁFICA CIRCULAR TIPO DONA ---
+def crear_grafica_dona(porcentaje, titulo_centro=""):
+    completado = porcentaje
+    pendiente = 100 - porcentaje
+    
+    fig = go.Figure(data=[go.Pie(
+        values=[completado, pendiente if completado > 0 else 100],
+        labels=['Completado', 'Pendiente'],
+        hole=0.6,
+        marker=dict(colors=['#198754', '#dc3545']),
+        textinfo='none',
+        hoverinfo='none'
+    )])
+    
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(t=10, b=10, l=10, r=10),
+        height=220,
+        annotations=[dict(
+            text=f"<b>{completado}%</b><br><span style='font-size:12px; color:gray;'>{titulo_centro}</span>",
+            x=0.5, y=0.5, font_size=18, showarrow=False
+        )]
+    )
+    return fig
+
 # --- BARRA LATERAL: REGISTRO DE ACTIVIDADES Y NAVEGACIÓN ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/school.png", width=80)
@@ -239,21 +265,17 @@ if selected == "Cronograma y Gestión":
                         st.markdown("🔴 Atrasada", unsafe_allow_html=True)
                     with col_p3:
                         if st.button("✔️ Marcar", key=f"btn_atrasada_{orig_idx}"):
-                            # 1. Copiar a la hoja "Completadas"
                             try:
                                 sheet_completadas = spreadsheet.worksheet("Completadas")
                                 sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
                             except Exception:
                                 pass
-                            # 2. Borrar de la hoja principal
                             sheet_principal.delete_rows(orig_idx + 2)
                             st.success("¡Completada y movida al historial!")
                             st.rerun()
                     with col_p4:
                         if st.button("🗑️ Borrar", key=f"del_atrasada_{orig_idx}"):
-                            # Borrar de principal
                             sheet_principal.delete_rows(orig_idx + 2)
-                            # Intentar borrar también de "Completadas" si existiera ahí
                             try:
                                 sheet_comp = spreadsheet.worksheet("Completadas")
                                 registros_comp = sheet_comp.get_all_records()
@@ -297,21 +319,17 @@ if selected == "Cronograma y Gestión":
                         st.markdown("🟠 Pendiente", unsafe_allow_html=True)
                     with col_h3:
                         if st.button("✔️ Marcar", key=f"btn_hoy_{orig_idx}"):
-                            # 1. Copiar a la hoja "Completadas"
                             try:
                                 sheet_completadas = spreadsheet.worksheet("Completadas")
                                 sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
                             except Exception:
                                 pass
-                            # 2. Borrar de la hoja principal
                             sheet_principal.delete_rows(orig_idx + 2)
                             st.success("¡Completada y movida al historial!")
                             st.rerun()
                     with col_h4:
                         if st.button("🗑️ Borrar", key=f"del_hoy_{orig_idx}"):
-                            # Borrar de principal
                             sheet_principal.delete_rows(orig_idx + 2)
-                            # Intentar borrar también de "Completadas"
                             try:
                                 sheet_comp = spreadsheet.worksheet("Completadas")
                                 registros_comp = sheet_comp.get_all_records()
@@ -432,21 +450,17 @@ if selected == "Cronograma y Gestión":
                     st.markdown("🟠 Pendiente", unsafe_allow_html=True)
                 with col_t3:
                     if st.button("✔️ Marcar", key=f"btn_terminar_{orig_idx}"):
-                        # 1. Copiar a la hoja "Completadas"
                         try:
                             sheet_completadas = spreadsheet.worksheet("Completadas")
                             sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
                         except Exception:
                             pass
-                        # 2. Borrar de la hoja principal
                         sheet_principal.delete_rows(orig_idx + 2)
                         st.success("¡Completada y movida al historial!")
                         st.rerun()
                 with col_t4:
                     if st.button("🗑️ Borrar", key=f"del_gestion_{orig_idx}"):
-                        # Borrar de principal
                         sheet_principal.delete_rows(orig_idx + 2)
-                        # Intentar borrar también de "Completadas"
                         try:
                             sheet_comp = spreadsheet.worksheet("Completadas")
                             registros_comp = sheet_comp.get_all_records()
@@ -467,38 +481,96 @@ elif selected == "Dashboard de Zona":
     st.title("📊 Dashboard Ejecutivo de Avance por Escuela")
     st.markdown("Monitoreo en tiempo real del cumplimiento de las 12 escuelas de la Zona 1.")
 
+    # 1. Cargar datos y porcentajes de las 12 escuelas en tiempo real
     avances_data = []
+    detalles_escuelas = {}
+    
     for i in range(1, 13):
-        nombre_pestana = f"Escuela_{i}"
+        nombre_pestana = f"ESCUELA {i}"
+        porcentaje_esc = 0
+        df_esc = pd.DataFrame()
         try:
             ws_escuela = spreadsheet.worksheet(nombre_pestana)
             data_escuela = ws_escuela.get_all_records()
             if data_escuela:
                 df_esc = pd.DataFrame(data_escuela)
+                df_esc.columns = [str(col).strip() for col in df_esc.columns]
                 total_tareas = len(df_esc)
-                if total_tareas > 0 and "Completada" in df_esc.columns:
-                    completadas = len(df_esc[df_esc["Completada"] == True])
-                    porcentaje = int((completadas / total_tareas) * 100)
-                else:
-                    porcentaje = 0
-            else:
-                porcentaje = 0
+                if total_tareas > 0 and "Estado" in df_esc.columns:
+                    completadas = len(df_esc[df_esc["Estado"].str.lower() == "completada"])
+                    porcentaje_esc = int((completadas / total_tareas) * 100)
         except Exception:
-            porcentaje = 0
+            pass
             
-        avances_data.append({"Escuela": f"Escuela {i}", "Porcentaje": porcentaje})
+        avances_data.append({"Escuela": f"ESCUELA {i}", "Porcentaje": porcentaje_esc})
+        detalles_escuelas[f"ESCUELA {i}"] = df_esc
 
     df_avances = pd.DataFrame(avances_data)
-
     promedio_zona = int(df_avances["Porcentaje"].mean())
+
+    # Métrica principal del promedio de la zona
     st.metric(label="📈 Avance Global Promedio de la Zona 1", value=f"{promedio_zona}%")
 
     st.markdown("---")
-    st.markdown("### Porcentaje de Avance Individual por Escuela")
-    st.bar_chart(df_avances.set_index("Escuela"), horizontal=True)
 
-    st.markdown("### Detalle Tabular")
-    st.dataframe(df_avances, use_container_width=True, hide_index=True)
+    # 2. Galería de Gráficas Circulares Tipo Dona para las 12 escuelas
+    st.markdown("### 📈 Avance de la Zona 1")
+    st.markdown("Estatus de cumplimiento de todos los planteles de la zona:")
+
+    cols = st.columns(3)
+    for idx, row in df_avances.iterrows():
+        esc_nombre = row["Escuela"]
+        esc_porc = row["Porcentaje"]
+        
+        with cols[idx % 3]:
+            with st.container(border=True):
+                fig_dona = crear_grafica_dona(esc_porc, esc_nombre)
+                st.plotly_chart(fig_dona, use_container_width=True)
+
+    st.markdown("---")
+
+    # 3. Auditoría y Desglose Detallado por Escuela para el Administrador
+    st.markdown("### 🔍 Auditoría y Desglose por Plantel")
+    st.markdown("Selecciona una escuela para revisar puntualmente qué actividades ha completado y cuáles tiene pendientes o atrasadas.")
+
+    escuela_seleccionada_admin = st.selectbox("🏫 Selecciona el Plantel a Auditar", [f"ESCUELA {i}" for i in range(1, 13)])
+    
+    df_audit = detalles_escuelas.get(escuela_seleccionada_admin, pd.DataFrame())
+
+    if not df_audit.empty and "Actividad" in df_audit.columns and "Estado" in df_audit.columns:
+        col_completadas_admin = df_audit[df_audit["Estado"].str.lower() == "completada"]
+        col_pendientes_admin = df_audit[df_audit["Estado"].str.lower() != "completada"]
+
+        tab_det_comp, tab_det_pend = st.tabs([
+            f"✅ Completadas ({len(col_completadas_admin)})", 
+            f"⏳ Pendientes / Atrasadas ({len(col_pendientes_admin)})"
+        ])
+
+        with tab_det_comp:
+            if not col_completadas_admin.empty:
+                for _, row_c in col_completadas_admin.iterrows():
+                    f_ini = formatear_fecha_corta(str(row_c.get("Fecha Inicio", "")).split("T")[0])
+                    f_fin = formatear_fecha_corta(str(row_c.get("Fecha Fin", "")).split("T")[0])
+                    rango = f"📅 Del {f_ini} al {f_fin}" if f_ini != f_fin else f"📅 {f_ini}"
+                    
+                    with st.container(border=True):
+                        st.markdown(f"**✅ {row_c['Actividad']}** &nbsp;|&nbsp; *<small>{rango}</small>*")
+            else:
+                st.info(f"{escuela_seleccionada_admin} aún no registra actividades completadas.")
+
+        with tab_det_pend:
+            if not col_pendientes_admin.empty:
+                for _, row_p in col_pendientes_admin.iterrows():
+                    f_ini = formatear_fecha_corta(str(row_p.get("Fecha Inicio", "")).split("T")[0])
+                    f_fin = formatear_fecha_corta(str(row_p.get("Fecha Fin", "")).split("T")[0])
+                    rango = f"📅 Del {f_ini} al {f_fin}" if f_ini != f_fin else f"📅 {f_ini}"
+                    
+                    with st.container(border=True):
+                        st.markdown(f"**⏳ {row_p['Actividad']}** &nbsp;|&nbsp; *<small>{rango}</small>* &nbsp;|&nbsp; 🔴 *Pendiente de entrega*")
+            else:
+                st.success(f"¡{escuela_seleccionada_admin} está al corriente con el 100% de sus actividades!")
+    else:
+        st.info(f"No hay registros de actividades disponibles para {escuela_seleccionada_admin}.")
 
 
 # --- 3. SECCIÓN: TAREAS COMPLETADAS (TARJETAS VISUALES CON HISTORIAL Y BORRADO) ---
