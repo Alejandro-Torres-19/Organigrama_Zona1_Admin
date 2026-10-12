@@ -4,3 +4,4 @@ streamlit-option-menu
 streamlit-calendar
 gspread
 google-auth
+plotly
