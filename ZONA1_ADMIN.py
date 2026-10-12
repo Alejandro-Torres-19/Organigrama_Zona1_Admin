@@ -481,7 +481,7 @@ elif selected == "Dashboard de Zona":
     st.title("📊 Dashboard Ejecutivo de Avance por Escuela")
     st.markdown("Monitoreo en tiempo real del cumplimiento de las 12 escuelas de la Zona 1.")
 
-    # 1. Cargar datos y porcentajes de las 12 escuelas en tiempo real
+    # Cargar datos de forma optimizada para evitar sobrecargar la API de Google Sheets
     avances_data = []
     detalles_escuelas = {}
     
@@ -513,7 +513,7 @@ elif selected == "Dashboard de Zona":
 
     st.markdown("---")
 
-    # 2. Galería de Gráficas Circulares Tipo Dona para las 12 escuelas
+    # Galería de Gráficas Circulares Tipo Dona para las 12 escuelas
     st.markdown("### 📈 Avance de la Zona 1")
     st.markdown("Estatus de cumplimiento de todos los planteles de la zona:")
 
@@ -525,15 +525,15 @@ elif selected == "Dashboard de Zona":
         with cols[idx % 3]:
             with st.container(border=True):
                 fig_dona = crear_grafica_dona(esc_porc, esc_nombre)
-                st.plotly_chart(fig_dona, use_container_width=True)
+                st.plotly_chart(fig_dona, use_container_width=True, key=f"admin_dona_{idx}")
 
     st.markdown("---")
 
-    # 3. Auditoría y Desglose Detallado por Escuela para el Administrador
+    # Auditoría y Desglose Detallado por Escuela para el Administrador
     st.markdown("### 🔍 Auditoría y Desglose por Plantel")
     st.markdown("Selecciona una escuela para revisar puntualmente qué actividades ha completado y cuáles tiene pendientes o atrasadas.")
 
-    escuela_seleccionada_admin = st.selectbox("🏫 Selecciona el Plantel a Auditar", [f"ESCUELA {i}" for i in range(1, 13)])
+    escuela_seleccionada_admin = st.selectbox("🏫 Selecciona el Plantel a Auditar", [f"ESCUELA {i}" for i in range(1, 13)], key="select_audit_escuela")
     
     df_audit = detalles_escuelas.get(escuela_seleccionada_admin, pd.DataFrame())
 
