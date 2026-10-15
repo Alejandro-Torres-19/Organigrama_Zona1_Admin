@@ -1,4 +1,7 @@
-from datetime import datetime, time, date
+import hashlib
+import hmac
+from datetime import date
+
 import streamlit as st
 import pandas as pd
 from streamlit_option_menu import option_menu
@@ -7,10 +10,129 @@ import plotly.graph_objects as go
 import gspread
 from google.oauth2.service_account import Credentials
 
+# Si es True, las actividades publicas que el admin ya movio a "Completadas"
+# tambien cuentan en el total contra el que se mide el avance de cada escuela.
+INCLUIR_HISTORIAL_EN_AVANCE = False
+
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
     page_title="Cronograma - Admin - Zona 1", page_icon="🏫", layout="wide"
 )
+
+
+# ======================= HELPERS (sin dependencia de la UI) =======================
+def es_privado(val):
+    return str(val).strip().lower() in ["true", "sí", "si", "1"]
+
+
+def es_publica(val):
+    return str(val).strip().lower() in ["false", "no", "0", "f"]
+
+
+def _norm_fecha(v):
+    return str(v).split("T")[0].strip()
+
+
+def formatear_fecha_corta(fecha_val):
+    if not fecha_val or str(fecha_val).strip() == "":
+        return ""
+    try:
+        dt = pd.to_datetime(str(fecha_val).split("T")[0])
+        return dt.strftime("%d-%m-%y")
+    except Exception:
+        return str(fecha_val).split("T")[0]
+
+
+def clave_tarea(actividad, fecha_inicio):
+    """Identifica una actividad por nombre + fecha de inicio (el nombre solo puede repetirse)."""
+    return f"{str(actividad).strip()}|{_norm_fecha(fecha_inicio)}"
+
+
+def hash_fila(row):
+    base = f"{row['Actividad']}|{row['Fecha Inicio']}|{row['Fecha Fin']}|{row['Privado']}"
+    return hashlib.md5(base.encode("utf-8")).hexdigest()[:10]
+
+
+def key_tarea(prefijo, row, vistos):
+    """Key de widget basada en el CONTENIDO de la fila (no en su posicion).
+    Si dos filas son identicas se les agrega un contador para evitar claves duplicadas."""
+    h = hash_fila(row)
+    n = vistos.get(h, 0)
+    vistos[h] = n + 1
+    return f"{prefijo}_{h}_{n}"
+
+
+def borrar_fila_segura(ws, row):
+    """Borra la fila que coincide por CONTENIDO (actividad, inicio, fin, privado).
+    Evita borrar otra fila cuando la tabla en cache ya esta desactualizada."""
+    act = str(row["Actividad"]).strip()
+    ini = _norm_fecha(row["Fecha Inicio"])
+    fin = _norm_fecha(row.get("Fecha Fin", "")) or ini
+    priv = str(row.get("Privado", "")).strip().lower()
+    filas = ws.get_all_values()
+    for n, f in enumerate(filas[1:], start=2):
+        f = list(f) + [""] * (4 - len(f))
+        if (
+            f[0].strip() == act
+            and _norm_fecha(f[1]) == ini
+            and (_norm_fecha(f[2]) or _norm_fecha(f[1])) == fin
+            and f[3].strip().lower() == priv
+        ):
+            ws.delete_rows(n)
+            return True
+    return False
+
+
+def calcular_avance_zona_core(spreadsheet, sheet_principal, lista_ccts, incluir_historial):
+    """Avance por escuela = actividades PUBLICAS completadas por la escuela / total de
+    actividades publicas. Una escuela sin filas en su pestana cuenta como 0 completadas
+    (antes el denominador era el numero de filas de su pestana, lo que inflaba el %)."""
+    hojas = {ws.title: ws for ws in spreadsheet.worksheets()}
+
+    publicas = []
+    fuentes = [sheet_principal]
+    if incluir_historial and "Completadas" in hojas:
+        fuentes.append(hojas["Completadas"])
+    vistas = set()
+    for ws in fuentes:
+        for r in ws.get_all_records():
+            actividad = str(r.get("Actividad", "")).strip()
+            if not actividad or not es_publica(r.get("Privado", "")):
+                continue
+            f_ini = _norm_fecha(r.get("Fecha Inicio", ""))
+            f_fin = _norm_fecha(r.get("Fecha Fin", "")) or f_ini
+            clave = (clave_tarea(actividad, f_ini), f_fin)
+            if clave in vistas:
+                continue
+            vistas.add(clave)
+            publicas.append({"Actividad": actividad, "Fecha Inicio": f_ini, "Fecha Fin": f_fin})
+
+    avances, detalles = [], {}
+    for cct in lista_ccts:
+        estatus = {}
+        ws = hojas.get(cct)
+        if ws is not None:
+            try:
+                for r in ws.get_all_records():
+                    estatus[clave_tarea(r.get("Actividad", ""), r.get("Fecha Inicio", ""))] = (
+                        str(r.get("Estado", "Pendiente")).strip().lower()
+                    )
+            except Exception:
+                pass
+        filas = []
+        for t in publicas:
+            hecho = estatus.get(clave_tarea(t["Actividad"], t["Fecha Inicio"])) == "completada"
+            filas.append({**t, "Estado": "Completada" if hecho else "Pendiente"})
+        df_esc = pd.DataFrame(filas, columns=["Actividad", "Fecha Inicio", "Fecha Fin", "Estado"])
+        total = len(df_esc)
+        completadas = int((df_esc["Estado"] == "Completada").sum()) if total else 0
+        # sin actividades publicas asignadas no hay nada pendiente
+        porcentaje = int(round(100 * completadas / total)) if total else 100
+        avances.append({"Escuela": cct, "Porcentaje": porcentaje})
+        detalles[cct] = df_esc
+    return avances, detalles
+# ======================= FIN HELPERS =======================
+
 
 # --- CONEXIÓN DIRECTA A GOOGLE SHEETS CON CACHÉ ---
 @st.cache_resource
@@ -21,23 +143,64 @@ def conectar_gspread():
     ]
     if "gcp_service_account" in st.secrets:
         credentials_dict = dict(st.secrets["gcp_service_account"])
-        creds = Credentials.from_service_account_info(
-            credentials_dict, scopes=scope
-        )
+        creds = Credentials.from_service_account_info(credentials_dict, scopes=scope)
     else:
-        st.error(
-            "No se encontraron las credenciales 'gcp_service_account' en secrets.toml"
-        )
+        st.error("No se encontraron las credenciales 'gcp_service_account' en secrets.toml")
         st.stop()
     client = gspread.authorize(creds)
     return client.open("ORGANIGRAMA_ZONA1")
 
+
+# --- SEGURIDAD: LOGIN ADMINISTRADOR (contraseña en st.secrets["admin_password"]) ---
+def check_password():
+    if st.session_state.get("password_correct"):
+        return True
+
+    password_admin = st.secrets.get("admin_password")
+    if not password_admin:
+        st.error("Falta 'admin_password' en los secrets de la aplicación.")
+        st.stop()
+
+    def password_entered():
+        ingresada = str(st.session_state.get("password", ""))
+        st.session_state["password_correct"] = hmac.compare_digest(
+            ingresada.encode("utf-8"), str(password_admin).encode("utf-8")
+        )
+        st.session_state.pop("password", None)
+
+    _, col_centro, _ = st.columns([1, 1.5, 1])
+    with col_centro:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("<h2 style='text-align: center;'>🏫 Cronograma - Admin</h2>", unsafe_allow_html=True)
+            st.markdown(
+                "<p style='text-align: center; color: gray;'>Sistema de Gestión y Seguimiento - Zona 1</p>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("---")
+            st.text_input(
+                "🔑 Contraseña de Administrador",
+                type="password",
+                on_change=password_entered,
+                key="password",
+                placeholder="Ingresa tu contraseña",
+            )
+            if st.session_state.get("password_correct") is False:
+                st.error("😕 Contraseña incorrecta. Inténtalo de nuevo.")
+    return False
+
+
+if not check_password():
+    st.stop()
+
+# --- CONEXIÓN (solo después de autenticarse) ---
 try:
     spreadsheet = conectar_gspread()
-    sheet_principal = spreadsheet.get_worksheet(0) # Pestaña 1: General (Hoja 1)
+    sheet_principal = spreadsheet.get_worksheet(0)  # Pestaña 1: General (Hoja 1)
 except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
     st.stop()
+
 
 # --- CARGAR USUARIOS DESDE 'INICIOS SESIÓN' CON CACHÉ ---
 @st.cache_data(ttl=300)
@@ -53,59 +216,12 @@ def cargar_credenciales_admin():
         st.error(f"No se pudo cargar la pestaña 'INICIOS SESIÓN': {e}")
     return pd.DataFrame()
 
+
 df_usuarios_admin = cargar_credenciales_admin()
 
-# --- SEGURIDAD: LOGIN ADMINISTRADOR ---
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == "Taguch_77":
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        _, col_centro, _ = st.columns([1, 1.5, 1])
-        with col_centro:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            with st.container(border=True):
-                st.markdown("<h2 style='text-align: center;'>🏫 Cronograma - Admin</h2>", unsafe_allow_html=True)
-                st.markdown("<p style='text-align: center; color: gray;'>Sistema de Gestión y Seguimiento - Zona 1</p>", unsafe_allow_html=True)
-                st.markdown("---")
-                st.text_input(
-                    "🔑 Contraseña de Administrador",
-                    type="password",
-                    on_change=password_entered,
-                    key="password",
-                    placeholder="Ingresa tu contraseña"
-                )
-                st.markdown("<br>", unsafe_allow_html=True)
-        return False
-    elif not st.session_state["password_correct"]:
-        _, col_centro, _ = st.columns([1, 1.5, 1])
-        with col_centro:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            with st.container(border=True):
-                st.markdown("<h2 style='text-align: center;'>🏫 Cronograma - Admin</h2>", unsafe_allow_html=True)
-                st.markdown("<p style='text-align: center; color: gray;'>Sistema de Gestión y Seguimiento - Zona 1</p>", unsafe_allow_html=True)
-                st.markdown("---")
-                st.text_input(
-                    "🔑 Contraseña de Administrador",
-                    type="password",
-                    on_change=password_entered,
-                    key="password",
-                    placeholder="Ingresa tu contraseña"
-                )
-                st.error("😕 Contraseña incorrecta. Inténtalo de nuevo.")
-        return False
-    else:
-        return True
-
-if not check_password():
-    st.stop()
 
 # --- CARGAR Y DEPURAR DATOS DE LA HOJA PRINCIPAL ---
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=5)
 def cargar_datos_principales():
     data = sheet_principal.get_all_records()
     if not data:
@@ -113,7 +229,7 @@ def cargar_datos_principales():
     else:
         df = pd.DataFrame(data)
         df.columns = [str(col).strip() for col in df.columns]
-        
+
         for col in ["Actividad", "Fecha Inicio", "Fecha Fin", "Privado", "Estado", "Color"]:
             if col not in df.columns:
                 match = [c for c in df.columns if col.lower().replace(" ", "") in c.lower().replace(" ", "")]
@@ -121,69 +237,139 @@ def cargar_datos_principales():
                     df.rename(columns={match[0]: col}, inplace=True)
                 else:
                     df[col] = ""
-                    
+
         df["Fecha Inicio"] = df["Fecha Inicio"].astype(str).str.split("T").str[0].str.strip()
-        
+
         col_fin_real = next((c for c in df.columns if "fin" in c.lower()), "Fecha Fin")
         if col_fin_real != "Fecha Fin":
             df.rename(columns={col_fin_real: "Fecha Fin"}, inplace=True)
-            
+
         df["Fecha Fin"] = df["Fecha Fin"].astype(str).str.split("T").str[0].str.strip()
         df["Fecha Fin"] = df["Fecha Fin"].replace(["", "nan", "NaT", "None"], pd.NA)
         df["Fecha Fin"] = df["Fecha Fin"].fillna(df["Fecha Inicio"])
-        
+
     return df
+
 
 df_tareas = cargar_datos_principales()
 
-# --- FUNCIÓN AUXILIAR PARA FORMATEAR FECHAS A DD-MM-YY ---
-def formatear_fecha_corta(fecha_val):
-    if not fecha_val or str(fecha_val).strip() == "":
-        return ""
+
+@st.cache_data(ttl=15)
+def calcular_avance_zona(lista_ccts):
+    return calcular_avance_zona_core(
+        spreadsheet, sheet_principal, list(lista_ccts), INCLUIR_HISTORIAL_EN_AVANCE
+    )
+
+
+# --- ACCIONES SOBRE ACTIVIDADES ---
+def completar_actividad(row):
+    """Copia la actividad a 'Completadas' y SOLO si se guardó, la borra de la hoja principal."""
     try:
-        dt = pd.to_datetime(str(fecha_val).split("T")[0])
-        return dt.strftime("%d-%m-%y")
-    except:
-        return str(fecha_val).split("T")[0]
+        ws_comp = spreadsheet.worksheet("Completadas")
+        ws_comp.append_row(
+            [row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]]
+        )
+    except Exception as e:
+        st.error(f"No se pudo guardar en 'Completadas': {e}")
+        return False
+    if not borrar_fila_segura(sheet_principal, row):
+        st.warning("La actividad ya no estaba en la hoja principal (quizá se completó desde otro lugar).")
+    st.cache_data.clear()
+    return True
+
+
+def eliminar_actividad(row):
+    borrar_fila_segura(sheet_principal, row)
+    try:
+        borrar_fila_segura(spreadsheet.worksheet("Completadas"), row)
+    except Exception:
+        pass
+    st.cache_data.clear()
+
+
+def texto_rango(row, sufijo=""):
+    f_ini_raw = _norm_fecha(row["Fecha Inicio"])
+    f_fin_raw = _norm_fecha(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_raw
+    f_ini_fmt = formatear_fecha_corta(f_ini_raw)
+    f_fin_fmt = formatear_fecha_corta(f_fin_raw)
+    if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
+        return f"📅 {f_ini_fmt}"
+    return f"📅 Del {f_ini_fmt} al {f_fin_fmt}{sufijo}"
+
+
+def render_tarjeta(row, prefijo, etiqueta, vistos, sufijo_rango=""):
+    icono = "🔒 " if es_privado(row["Privado"]) else "🏫 "
+    rango = texto_rango(row, sufijo_rango)
+    k = key_tarea(prefijo, row, vistos)
+    with st.container(border=True):
+        c1, c2, c3, c4 = st.columns([3, 1, 0.7, 0.7])
+        with c1:
+            st.markdown(
+                f"**{icono} {row['Actividad']}** &nbsp;|&nbsp; *<small>{rango}</small>*",
+                unsafe_allow_html=True,
+            )
+        with c2:
+            st.markdown(etiqueta, unsafe_allow_html=True)
+        with c3:
+            if st.button("✔️ Marcar", key=f"ok_{k}"):
+                if completar_actividad(row):
+                    st.success("¡Completada y movida al historial!")
+                    st.rerun()
+        with c4:
+            if st.button("🗑️ Borrar", key=f"del_{k}"):
+                eliminar_actividad(row)
+                st.success("¡Eliminada por completo!")
+                st.rerun()
+
 
 # --- FUNCIÓN PARA GENERAR GRÁFICA CIRCULAR TIPO DONA ---
 def crear_grafica_dona(porcentaje, titulo_centro=""):
     completado = porcentaje
     pendiente = 100 - porcentaje
-    
-    fig = go.Figure(data=[go.Pie(
-        values=[completado, pendiente if completado > 0 else 100],
-        labels=['Completado', 'Pendiente'],
-        hole=0.6,
-        marker=dict(colors=['#198754', '#dc3545']),
-        textinfo='none',
-        hoverinfo='none'
-    )])
-    
+
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                values=[completado, pendiente if completado > 0 else 100],
+                labels=["Completado", "Pendiente"],
+                hole=0.6,
+                marker=dict(colors=["#198754", "#dc3545"]),
+                textinfo="none",
+                hoverinfo="none",
+            )
+        ]
+    )
+
     fig.update_layout(
         showlegend=False,
         margin=dict(t=10, b=10, l=10, r=10),
         height=220,
-        annotations=[dict(
-            text=f"<b>{completado}%</b><br><span style='font-size:12px; color:gray;'>{titulo_centro}</span>",
-            x=0.5, y=0.5, font_size=18, showarrow=False
-        )]
+        annotations=[
+            dict(
+                text=f"<b>{completado}%</b><br><span style='font-size:12px; color:gray;'>{titulo_centro}</span>",
+                x=0.5,
+                y=0.5,
+                font_size=18,
+                showarrow=False,
+            )
+        ],
     )
     return fig
+
 
 # --- BARRA LATERAL: REGISTRO DE ACTIVIDADES Y NAVEGACIÓN ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/school.png", width=80)
     st.title("Supervisión Zona 1")
     st.markdown("---")
-    
+
     st.subheader("➕ Registrar Actividad")
     with st.form("form_nueva_actividad_sidebar"):
         nom_actividad = st.text_input("Nombre de la Actividad")
         es_privada = st.selectbox("¿Es una tarea privada?", ["No", "Sí"])
-        
+
         f_inicio = st.date_input("Fecha de Inicio", value=date.today(), format="DD/MM/YYYY")
-        
+
         solo_un_dia = st.checkbox("¿Actividad de un solo día?")
         if solo_un_dia:
             f_fin = f_inicio
@@ -196,21 +382,18 @@ with st.sidebar:
             "🟡 Amarillo (Pendiente / En proceso)": "#ffc107",
             "🟣 Morado (Especial / Institucional)": "#6f42c1",
             "🔴 Rojo (Urgente / Retrasado)": "#dc3545",
-            "⚪ Gris (Extra)": "#6c757d"
+            "⚪ Gris (Extra)": "#6c757d",
         }
         color_seleccionado_key = st.selectbox("Función / Color", list(opciones_colores.keys()))
         color_actividad = opciones_colores[color_seleccionado_key]
-        
+
         submit_btn = st.form_submit_button("Guardar en Calendario")
         if submit_btn:
             if nom_actividad:
-                f_ini_fmt_gs = f_inicio.strftime("%Y-%m-%d")
-                f_fin_fmt_gs = f_fin.strftime("%Y-%m-%d")
-                
                 nueva_fila = [
                     nom_actividad,
-                    f_ini_fmt_gs,
-                    f_fin_fmt_gs,
+                    f_inicio.strftime("%Y-%m-%d"),
+                    f_fin.strftime("%Y-%m-%d"),
                     es_privada,
                     "Pendiente",
                     color_actividad,
@@ -223,7 +406,7 @@ with st.sidebar:
                 st.warning("Ingresa el nombre de la actividad.")
 
     st.markdown("---")
-    
+
     selected = option_menu(
         menu_title="Navegación",
         options=["Cronograma y Gestión", "Dashboard de Zona", "Tareas Completadas"],
@@ -237,76 +420,29 @@ if selected == "Cronograma y Gestión":
     st.title("📅 Cronograma Global y Gestión de Actividades")
     st.markdown("Administra las actividades generales para las 12 escuelas y controla tus tareas privadas.")
 
-    hoy_date_obj = date.today()
-    hoy_dt = pd.Timestamp(hoy_date_obj).normalize()
-    
+    hoy_dt = pd.Timestamp(date.today()).normalize()
+
     if not df_tareas.empty:
-        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
-        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors='coerce').dt.normalize()
+        df_tareas["Fecha_Inicio_dt"] = pd.to_datetime(
+            df_tareas["Fecha Inicio"].astype(str).str.split("T").str[0], errors="coerce"
+        ).dt.normalize()
+        df_tareas["Fecha_Fin_dt"] = pd.to_datetime(
+            df_tareas["Fecha Fin"].astype(str).str.split("T").str[0], errors="coerce"
+        ).dt.normalize()
         df_tareas["Fecha_Fin_dt"] = df_tareas["Fecha_Fin_dt"].fillna(df_tareas["Fecha_Inicio_dt"])
-        
-        atrasadas_df = df_tareas[
-            (df_tareas["Fecha_Fin_dt"] < hoy_dt) & 
-            (df_tareas["Estado"].str.lower() != "completada")
-        ]
-        
+
+        no_completada = df_tareas["Estado"].str.lower() != "completada"
+        atrasadas_df = df_tareas[(df_tareas["Fecha_Fin_dt"] < hoy_dt) & no_completada]
         hoy_df = df_tareas[
-            (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & 
-            (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & 
-            (df_tareas["Estado"].str.lower() != "completada")
+            (df_tareas["Fecha_Inicio_dt"] <= hoy_dt) & (df_tareas["Fecha_Fin_dt"] >= hoy_dt) & no_completada
         ]
 
         # --- SECCIÓN: ACTIVIDADES ATRASADAS ---
         st.markdown("### ⚠️ Actividades Atrasadas")
         if not atrasadas_df.empty:
-            for idx, row in atrasadas_df.iterrows():
-                orig_idx = row.name
-                priv_val = str(row["Privado"]).strip().lower()
-                es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-                icono = "🔒 " if es_privada_bool else "🏫 "
-                
-                f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-                f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-                f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-                f_fin_fmt = formatear_fecha_corta(f_fin_raw)
-                
-                if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
-                    rango_fechas = f"📅 {f_ini_fmt}"
-                else:
-                    rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
-                
-                with st.container(border=True):
-                    col_p1, col_p2, col_p3, col_p4 = st.columns([3, 1, 0.7, 0.7])
-                    with col_p1:
-                        st.markdown(f"**{icono} {row['Actividad']}** &nbsp;|&nbsp; *<small>{rango_fechas}</small>*", unsafe_allow_html=True)
-                    with col_p2:
-                        st.markdown("🔴 Atrasada", unsafe_allow_html=True)
-                    with col_p3:
-                        if st.button("✔️ Marcar", key=f"btn_atrasada_{orig_idx}"):
-                            try:
-                                sheet_completadas = spreadsheet.worksheet("Completadas")
-                                sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
-                            except Exception:
-                                pass
-                            sheet_principal.delete_rows(orig_idx + 2)
-                            st.cache_data.clear()
-                            st.success("¡Completada y movida al historial!")
-                            st.rerun()
-                    with col_p4:
-                        if st.button("🗑️ Borrar", key=f"del_atrasada_{orig_idx}"):
-                            sheet_principal.delete_rows(orig_idx + 2)
-                            try:
-                                sheet_comp = spreadsheet.worksheet("Completadas")
-                                registros_comp = sheet_comp.get_all_records()
-                                for i, r in enumerate(registros_comp):
-                                    if str(r.get("Actividad")) == str(row["Actividad"]) and str(r.get("Fecha Inicio")) == str(row["Fecha Inicio"]):
-                                        sheet_comp.delete_rows(i + 2)
-                                        break
-                            except Exception:
-                                pass
-                            st.cache_data.clear()
-                            st.success("¡Eliminada por completo!")
-                            st.rerun()
+            vistos = {}
+            for _, row in atrasadas_df.iterrows():
+                render_tarjeta(row, "atrasada", "🔴 Atrasada", vistos)
         else:
             st.success("🎉 ¡Excelente! No tienes actividades atrasadas.")
 
@@ -315,54 +451,9 @@ if selected == "Cronograma y Gestión":
         # --- SECCIÓN: PENDIENTES DE HOY ---
         st.markdown("### 🔔 Pendientes de Hoy")
         if not hoy_df.empty:
-            for idx, row in hoy_df.iterrows():
-                orig_idx = row.name
-                priv_val = str(row["Privado"]).strip().lower()
-                es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-                icono = "🔒 " if es_privada_bool else "🏫 "
-                
-                f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-                f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-                f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-                f_fin_fmt = formatear_fecha_corta(f_fin_raw)
-                
-                if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
-                    rango_fechas = f"📅 {f_ini_fmt}"
-                else:
-                    rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt}"
-                
-                with st.container(border=True):
-                    col_h1, col_h2, col_h3, col_h4 = st.columns([3, 1, 0.7, 0.7])
-                    with col_h1:
-                        st.markdown(f"**{icono} {row['Actividad']}** &nbsp;|&nbsp; *<small>{rango_fechas}</small>*", unsafe_allow_html=True)
-                    with col_h2:
-                        st.markdown("🟠 Pendiente", unsafe_allow_html=True)
-                    with col_h3:
-                        if st.button("✔️ Marcar", key=f"btn_hoy_{orig_idx}"):
-                            try:
-                                sheet_completadas = spreadsheet.worksheet("Completadas")
-                                sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
-                            except Exception:
-                                pass
-                            sheet_principal.delete_rows(orig_idx + 2)
-                            st.cache_data.clear()
-                            st.success("¡Completada y movida al historial!")
-                            st.rerun()
-                    with col_h4:
-                        if st.button("🗑️ Borrar", key=f"del_hoy_{orig_idx}"):
-                            sheet_principal.delete_rows(orig_idx + 2)
-                            try:
-                                sheet_comp = spreadsheet.worksheet("Completadas")
-                                registros_comp = sheet_comp.get_all_records()
-                                for i, r in enumerate(registros_comp):
-                                    if str(r.get("Actividad")) == str(row["Actividad"]) and str(r.get("Fecha Inicio")) == str(row["Fecha Inicio"]):
-                                        sheet_comp.delete_rows(i + 2)
-                                        break
-                            except Exception:
-                                pass
-                            st.cache_data.clear()
-                            st.success("¡Eliminada por completo!")
-                            st.rerun()
+            vistos = {}
+            for _, row in hoy_df.iterrows():
+                render_tarjeta(row, "hoy", "🟠 Pendiente", vistos)
         else:
             st.success("🎉 ¡Excelente! No hay actividades programadas específicamente para el día de hoy.")
     else:
@@ -373,43 +464,47 @@ if selected == "Cronograma y Gestión":
     # --- CALENDARIO GLOBAL Y AGENDA QUINCENAL ---
     st.markdown("### 🗓️ Visualización del Calendario y Agenda")
 
-    st.markdown("""
+    st.markdown(
+        """
         <style>
         .fc-list-event-time { display: none !important; }
         .fc-view-harness { min-height: 700px !important; }
         </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     calendar_events = []
     if not df_tareas.empty:
         for _, row in df_tareas.iterrows():
-            priv_val = str(row["Privado"]).strip().lower()
-            es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-            icono_titulo = "🔒 " if es_privada_bool else "🏫 "
-            
-            f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-            f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-            
+            es_priv = es_privado(row["Privado"])
+            icono_titulo = "🔒 " if es_priv else "🏫 "
+
+            f_ini_raw = _norm_fecha(row["Fecha Inicio"])
+            f_fin_raw = _norm_fecha(row["Fecha Fin"]) if row["Fecha Fin"] else f_ini_raw
+
             try:
                 f_ini_dt = pd.to_datetime(f_ini_raw).strftime("%Y-%m-%d")
                 f_fin_dt = (pd.to_datetime(f_fin_raw) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-            except:
+            except Exception:
                 f_ini_dt = f_ini_raw
                 f_fin_dt = f_fin_raw
 
             estado_evt = str(row["Estado"]).strip().lower()
-            if es_privada_bool and estado_evt == "completada":
+            if es_priv and estado_evt == "completada":
                 color_evento = "#28a745"
             else:
                 color_evento = row["Color"] if row["Color"] else "#3788d8"
 
-            calendar_events.append({
-                "title": f"{icono_titulo}{row['Actividad']}",
-                "start": f_ini_dt,
-                "end": f_fin_dt,
-                "color": color_evento,
-                "allDay": True
-            })
+            calendar_events.append(
+                {
+                    "title": f"{icono_titulo}{row['Actividad']}",
+                    "start": f_ini_dt,
+                    "end": f_fin_dt,
+                    "color": color_evento,
+                    "allDay": True,
+                }
+            )
 
     calendar_options = {
         "editable": False,
@@ -417,11 +512,11 @@ if selected == "Cronograma y Gestión":
         "headerToolbar": {
             "left": "prev,next today",
             "center": "title",
-            "right": "listFortnight,dayGridMonth"
+            "right": "listFortnight,dayGridMonth",
         },
         "views": {
-            "listFortnight": { "type": "list", "duration": {"days": 15}, "buttonText": "Agenda Quincenal" },
-            "dayGridMonth": { "buttonText": "Mes" }
+            "listFortnight": {"type": "list", "duration": {"days": 15}, "buttonText": "Agenda Quincenal"},
+            "dayGridMonth": {"buttonText": "Mes"},
         },
         "initialView": "listFortnight",
         "locale": "es",
@@ -436,96 +531,30 @@ if selected == "Cronograma y Gestión":
     st.markdown("Marca aquí las actividades que has concluido de forma personal o interna como administrador.")
 
     if not df_tareas.empty:
-        for idx, row in df_tareas.iterrows():
-            orig_idx = row.name
-            priv_val = str(row["Privado"]).strip().lower()
-            es_privada_bool = priv_val in ["true", "sí", "si", "1"]
-            icono = "🔒 " if es_privada_bool else "🏫 "
-            
-            f_ini_raw = str(row["Fecha Inicio"]).split("T")[0]
-            f_fin_raw = str(row["Fecha Fin"]).split("T")[0] if row["Fecha Fin"] else f_ini_raw
-            f_ini_fmt = formatear_fecha_corta(f_ini_raw)
-            f_fin_fmt = formatear_fecha_corta(f_fin_raw)
-            
-            if f_ini_raw == f_fin_raw or not row["Fecha Fin"] or str(row["Fecha Fin"]).strip() == "":
-                rango_fechas = f"📅 {f_ini_fmt}"
-            else:
-                rango_fechas = f"📅 Del {f_ini_fmt} al {f_fin_fmt} (Rango Activo)"
-            
-            with st.container(border=True):
-                col_t1, col_t2, col_t3, col_t4 = st.columns([3, 1, 0.7, 0.7])
-                with col_t1:
-                    st.markdown(f"**{icono} {row['Actividad']}** &nbsp;|&nbsp; *<small>{rango_fechas}</small>*", unsafe_allow_html=True)
-                with col_t2:
-                    st.markdown("🟠 Pendiente", unsafe_allow_html=True)
-                with col_t3:
-                    if st.button("✔️ Marcar", key=f"btn_terminar_{orig_idx}"):
-                        try:
-                            sheet_completadas = spreadsheet.worksheet("Completadas")
-                            sheet_completadas.append_row([row["Actividad"], row["Fecha Inicio"], row["Fecha Fin"], row["Privado"], "Completada", row["Color"]])
-                        except Exception:
-                            pass
-                        sheet_principal.delete_rows(orig_idx + 2)
-                        st.cache_data.clear()
-                        st.success("¡Completada y movida al historial!")
-                        st.rerun()
-                with col_t4:
-                    if st.button("🗑️ Borrar", key=f"del_gestion_{orig_idx}"):
-                        sheet_principal.delete_rows(orig_idx + 2)
-                        try:
-                            sheet_comp = spreadsheet.worksheet("Completadas")
-                            registros_comp = sheet_comp.get_all_records()
-                            for i, r in enumerate(registros_comp):
-                                if str(r.get("Actividad")) == str(row["Actividad"]) and str(r.get("Fecha Inicio")) == str(row["Fecha Inicio"]):
-                                    sheet_comp.delete_rows(i + 2)
-                                    break
-                        except Exception:
-                            pass
-                        st.cache_data.clear()
-                        st.success("¡Eliminada por completo!")
-                        st.rerun()
+        vistos = {}
+        for _, row in df_tareas.iterrows():
+            render_tarjeta(row, "gestion", "🟠 Pendiente", vistos, sufijo_rango=" (Rango Activo)")
     else:
         st.info("No hay actividades registradas.")
 
 
-# --- 2. SECCIÓN: DASHBOARD DE ZONA (CON CCT REALES Y CACHÉ) ---
+# --- 2. SECCIÓN: DASHBOARD DE ZONA ---
 elif selected == "Dashboard de Zona":
     st.title("📊 Dashboard Ejecutivo de Avance por Escuela")
     st.markdown("Monitoreo en tiempo real del cumplimiento de los planteles de la Zona 1.")
 
-    @st.cache_data(ttl=60)
-    def calcular_dashboard_admin():
-        lista_ccts = df_usuarios_admin["CCT"].astype(str).str.strip().unique().tolist() if not df_usuarios_admin.empty and "CCT" in df_usuarios_admin.columns else []
-        avances = []
-        detalles = {}
-        
-        for cct_item in lista_ccts:
-            porcentaje_esc = 0
-            df_esc = pd.DataFrame()
-            try:
-                ws_escuela = spreadsheet.worksheet(cct_item)
-                data_escuela = ws_escuela.get_all_records()
-                if data_escuela:
-                    df_esc = pd.DataFrame(data_escuela)
-                    df_esc.columns = [str(col).strip() for col in df_esc.columns]
-                    total_tareas = len(df_esc)
-                    if total_tareas > 0 and "Estado" in df_esc.columns:
-                        completadas = len(df_esc[df_esc["Estado"].str.lower() == "completada"])
-                        porcentaje_esc = int((completadas / total_tareas) * 100)
-            except Exception:
-                pass
-                
-            avances.append({"Escuela": cct_item, "Porcentaje": porcentaje_esc})
-            detalles[cct_item] = df_esc
-            
-        return avances, detalles
+    lista_ccts = (
+        df_usuarios_admin["CCT"].astype(str).str.strip().unique().tolist()
+        if not df_usuarios_admin.empty and "CCT" in df_usuarios_admin.columns
+        else []
+    )
 
-    avances_data, detalles_escuelas = calcular_dashboard_admin()
+    avances_data, detalles_escuelas = calcular_avance_zona(tuple(lista_ccts))
     df_avances = pd.DataFrame(avances_data)
-    
-    promedio_zona = int(df_avances["Porcentaje"].mean()) if not df_avances.empty else 0
 
+    promedio_zona = int(df_avances["Porcentaje"].mean()) if not df_avances.empty else 0
     st.metric(label="📈 Avance Global Promedio de la Zona 1", value=f"{promedio_zona}%")
+    st.caption("El avance de cada escuela es: actividades públicas completadas ÷ total de actividades públicas.")
 
     st.markdown("---")
 
@@ -536,61 +565,69 @@ elif selected == "Dashboard de Zona":
     if not df_avances.empty:
         cols = st.columns(3)
         for idx, row in df_avances.iterrows():
-            esc_nombre = row["Escuela"]
-            esc_porc = row["Porcentaje"]
-            
             with cols[idx % 3]:
                 with st.container(border=True):
-                    fig_dona = crear_grafica_dona(esc_porc, esc_nombre)
+                    fig_dona = crear_grafica_dona(row["Porcentaje"], row["Escuela"])
                     st.plotly_chart(fig_dona, use_container_width=True, key=f"admin_dona_{idx}")
 
     st.markdown("---")
 
     # Auditoría y Desglose Detallado por CCT
     st.markdown("### 🔍 Auditoría y Desglose por Plantel")
-    st.markdown("Selecciona una escuela (CCT) para revisar puntualmente qué actividades ha completado y cuáles tiene pendientes o atrasadas.")
+    st.markdown(
+        "Selecciona una escuela (CCT) para revisar puntualmente qué actividades ha completado y cuáles tiene pendientes o atrasadas."
+    )
 
-    lista_ccts_disponibles = df_usuarios_admin["CCT"].astype(str).str.strip().unique().tolist() if not df_usuarios_admin.empty else []
-    
-    if lista_ccts_disponibles:
-        escuela_seleccionada_admin = st.selectbox("🏫 Selecciona el Plantel a Auditar (CCT)", lista_ccts_disponibles, key="select_audit_cct")
-        
+    if lista_ccts:
+        escuela_seleccionada_admin = st.selectbox(
+            "🏫 Selecciona el Plantel a Auditar (CCT)", lista_ccts, key="select_audit_cct"
+        )
         df_audit = detalles_escuelas.get(escuela_seleccionada_admin, pd.DataFrame())
 
-        if not df_audit.empty and "Actividad" in df_audit.columns and "Estado" in df_audit.columns:
-            col_completadas_admin = df_audit[df_audit["Estado"].str.lower() == "completada"]
-            col_pendientes_admin = df_audit[df_audit["Estado"].str.lower() != "completada"]
+        if not df_audit.empty:
+            col_completadas_admin = df_audit[df_audit["Estado"] == "Completada"]
+            col_pendientes_admin = df_audit[df_audit["Estado"] != "Completada"]
 
-            tab_det_comp, tab_det_pend = st.tabs([
-                f"✅ Completadas ({len(col_completadas_admin)})", 
-                f"⏳ Pendientes / Atrasadas ({len(col_pendientes_admin)})"
-            ])
+            tab_det_comp, tab_det_pend = st.tabs(
+                [
+                    f"✅ Completadas ({len(col_completadas_admin)})",
+                    f"⏳ Pendientes / Atrasadas ({len(col_pendientes_admin)})",
+                ]
+            )
+
+            def _rango(r):
+                f_ini = formatear_fecha_corta(r.get("Fecha Inicio", ""))
+                f_fin = formatear_fecha_corta(r.get("Fecha Fin", ""))
+                return f"📅 Del {f_ini} al {f_fin}" if f_ini != f_fin else f"📅 {f_ini}"
 
             with tab_det_comp:
                 if not col_completadas_admin.empty:
                     for _, row_c in col_completadas_admin.iterrows():
-                        f_ini = formatear_fecha_corta(str(row_c.get("Fecha Inicio", "")).split("T")[0])
-                        f_fin = formatear_fecha_corta(str(row_c.get("Fecha Fin", "")).split("T")[0])
-                        rango = f"📅 Del {f_ini} al {f_fin}" if f_ini != f_fin else f"📅 {f_ini}"
-                        
                         with st.container(border=True):
-                            st.markdown(f"**✅ {row_c['Actividad']}** &nbsp;|&nbsp; *<small>{rango}</small>*")
+                            st.markdown(
+                                f"**✅ {row_c['Actividad']}** &nbsp;|&nbsp; *<small>{_rango(row_c)}</small>*",
+                                unsafe_allow_html=True,
+                            )
                 else:
                     st.info(f"{escuela_seleccionada_admin} aún no registra actividades completadas.")
 
             with tab_det_pend:
                 if not col_pendientes_admin.empty:
+                    hoy_ts = pd.Timestamp(date.today()).normalize()
                     for _, row_p in col_pendientes_admin.iterrows():
-                        f_ini = formatear_fecha_corta(str(row_p.get("Fecha Inicio", "")).split("T")[0])
-                        f_fin = formatear_fecha_corta(str(row_p.get("Fecha Fin", "")).split("T")[0])
-                        rango = f"📅 Del {f_ini} al {f_fin}" if f_ini != f_fin else f"📅 {f_ini}"
-                        
+                        fin_dt = pd.to_datetime(row_p["Fecha Fin"], errors="coerce")
+                        etiqueta = (
+                            "🔴 *Atrasada*" if pd.notna(fin_dt) and fin_dt.normalize() < hoy_ts else "🟠 *Pendiente*"
+                        )
                         with st.container(border=True):
-                            st.markdown(f"**⏳ {row_p['Actividad']}** &nbsp;|&nbsp; *<small>{rango}</small>* &nbsp;|&nbsp; 🔴 *Pendiente de entrega*")
+                            st.markdown(
+                                f"**⏳ {row_p['Actividad']}** &nbsp;|&nbsp; *<small>{_rango(row_p)}</small>* &nbsp;|&nbsp; {etiqueta}",
+                                unsafe_allow_html=True,
+                            )
                 else:
                     st.success(f"¡{escuela_seleccionada_admin} está al corriente con el 100% de sus actividades!")
         else:
-            st.info(f"No hay registros de actividades disponibles para {escuela_seleccionada_admin}.")
+            st.info("No hay actividades públicas registradas.")
     else:
         st.warning("No se encontraron CCTs en la pestaña 'INICIOS SESIÓN'.")
 
@@ -600,14 +637,20 @@ elif selected == "Tareas Completadas":
     st.title("✅ Historial de Tareas Completadas")
     st.markdown("Visualiza por separado las actividades concluidas a nivel zona y las concluidas individualmente.")
 
-    tab_zona, tab_admin = st.tabs(["🌍 Completadas a Nivel Zona (100% Escuelas)", "👤 Completadas Individualmente (Admin)"])
+    tab_zona, tab_admin = st.tabs(
+        ["🌍 Completadas a Nivel Zona (100% Escuelas)", "👤 Completadas Individualmente (Admin)"]
+    )
 
     with tab_zona:
         st.subheader("Tareas con 100% de Cumplimiento en la Zona")
         if not df_tareas.empty and "Estado" in df_tareas.columns:
             completadas_zona = df_tareas[df_tareas["Estado"] == "Completada Global"]
             if not completadas_zona.empty:
-                st.dataframe(completadas_zona[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]], use_container_width=True, hide_index=True)
+                st.dataframe(
+                    completadas_zona[["Actividad", "Fecha Inicio", "Fecha Fin", "Privado"]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
             else:
                 st.info("Aún no hay actividades completadas por el 100% de las escuelas en la zona.")
         else:
@@ -620,17 +663,22 @@ elif selected == "Tareas Completadas":
             data_completadas = sheet_completadas.get_all_records()
             if data_completadas:
                 df_completadas_admin = pd.DataFrame(data_completadas)
-                
-                for idx, row in df_completadas_admin.iterrows():
-                    orig_idx_comp = idx + 2
+                vistos = {}
+
+                for _, row in df_completadas_admin.iterrows():
                     actividad_nombre = row.get("Actividad", "Sin nombre")
-                    f_ini = formatear_fecha_corta(str(row.get("Fecha Inicio", "")).split("T")[0])
-                    f_fin = formatear_fecha_corta(str(row.get("Fecha Fin", "")).split("T")[0])
-                    priv_raw = str(row.get("Privado", "False")).strip().lower()
-                    es_priv = priv_raw in ["true", "sí", "si", "1"]
-                    
-                    badge_privado = "🔒 Privada" if es_priv else "🏫 General"
-                    
+                    f_ini = formatear_fecha_corta(_norm_fecha(row.get("Fecha Inicio", "")))
+                    f_fin = formatear_fecha_corta(_norm_fecha(row.get("Fecha Fin", "")))
+                    badge_privado = "🔒 Privada" if es_privado(row.get("Privado", "False")) else "🏫 General"
+
+                    fila_h = {
+                        "Actividad": actividad_nombre,
+                        "Fecha Inicio": row.get("Fecha Inicio", ""),
+                        "Fecha Fin": row.get("Fecha Fin", ""),
+                        "Privado": row.get("Privado", ""),
+                    }
+                    k = key_tarea("hist", fila_h, vistos)
+
                     with st.container(border=True):
                         col_card1, col_card2, col_card3 = st.columns([3, 1.5, 0.8])
                         with col_card1:
@@ -640,12 +688,15 @@ elif selected == "Tareas Completadas":
                             st.markdown(f"<br>**Tipo:** {badge_privado}", unsafe_allow_html=True)
                         with col_card3:
                             st.markdown("<br>", unsafe_allow_html=True)
-                            if st.button("🗑️ Eliminar", key=f"del_historial_{idx}"):
-                                sheet_completadas.delete_rows(orig_idx_comp)
+                            if st.button("🗑️ Eliminar", key=f"del_{k}"):
+                                borrar_fila_segura(sheet_completadas, pd.Series(fila_h))
                                 st.cache_data.clear()
                                 st.success("¡Registro eliminado del historial!")
                                 st.rerun()
             else:
                 st.info("Aún no hay registros en la hoja de completadas.")
-        except Exception as e:
-            st.info("Aún no has marcado ninguna tarea como terminada individualmente o la pestaña 'Completadas' no está configurada.")
+        except Exception:
+            st.info(
+                "Aún no has marcado ninguna tarea como terminada individualmente o la pestaña 'Completadas' no está configurada."
+            )
+
