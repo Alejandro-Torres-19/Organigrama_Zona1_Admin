@@ -1,7 +1,7 @@
 streamlit
 pandas
-streamlit-option-menu
-streamlit-calendar
 gspread
-google-auth
+oauth2client
+streamlit-calendar
 plotly
+streamlit-option-menu
