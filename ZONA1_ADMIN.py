@@ -156,8 +156,9 @@ def conectar_gspread():
 
 # --- SEGURIDAD: LOGIN ADMINISTRADOR PERSISTENTE ---
 # Se mantiene la contraseña original de st.secrets["admin_password"].
-# Requiere instalar: streamlit-cookies-manager
-# Y agregar a Secrets: auth_cookie_key = "TU_CLAVE_ALEATORIA_LARGA"
+# Requiere instalar: streamlit-cookies-manager-v2
+# Usa la contraseña original de admin_password para derivar internamente
+# la clave de la cookie. NO se requiere auth_cookie_key en Secrets.
 #
 # IMPORTANTE: una cookie no puede durar eternamente. El navegador la guarda hasta
 # un año y renovamos su vigencia cuando el administrador vuelve a utilizar la app.
@@ -168,14 +169,19 @@ COOKIE_VIGENCIA_SEGUNDOS = 365 * 24 * 60 * 60
 RENOVAR_DESPUES_SEGUNDOS = 7 * 24 * 60 * 60
 
 password_admin = st.secrets.get("admin_password")
-auth_cookie_key = st.secrets.get("auth_cookie_key")
 if not password_admin:
     st.error("Falta 'admin_password' en Secrets. No es seguro continuar.")
     st.stop()
-if not auth_cookie_key or len(str(auth_cookie_key)) < 32:
-    st.error("Falta 'auth_cookie_key' en Secrets (mínimo 32 caracteres aleatorios).")
-    st.info("Añade auth_cookie_key con una clave aleatoria distinta de tu contraseña admin.")
-    st.stop()
+
+# Solo se necesita tu contraseña de siempre: de ella se deriva una clave
+# distinta para cifrar la cookie, sin guardarla en Chrome ni pedir otra clave.
+# La protección de esta clave depende de la fortaleza de admin_password.
+auth_cookie_key = hashlib.pbkdf2_hmac(
+    "sha256",
+    str(password_admin).encode("utf-8"),
+    b"cronograma-zona1-admin-cookie-key-v1",
+    200_000,
+).hex()
 
 cookies = EncryptedCookieManager(
     prefix="cronograma_zona1_admin/",
