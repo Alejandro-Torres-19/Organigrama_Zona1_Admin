@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import json
+import time
 from datetime import date
 
 import streamlit as st
@@ -9,6 +11,7 @@ from streamlit_calendar import calendar
 import plotly.graph_objects as go
 import gspread
 from google.oauth2.service_account import Credentials
+from streamlit_cookies_manager import EncryptedCookieManager
 
 # Si es True, las actividades publicas que el admin ya movio a "Completadas"
 # tambien cuentan en el total contra el que se mide el avance de cada escuela.
@@ -151,22 +154,82 @@ def conectar_gspread():
     return client.open("ORGANIGRAMA_ZONA1")
 
 
-# --- SEGURIDAD: LOGIN ADMINISTRADOR (contraseña en st.secrets["admin_password"]) ---
-def check_password():
-    if st.session_state.get("password_correct"):
+# --- SEGURIDAD: LOGIN ADMINISTRADOR PERSISTENTE ---
+# Se mantiene la contraseña original de st.secrets["admin_password"].
+# Requiere instalar: streamlit-cookies-manager
+# Y agregar a Secrets: auth_cookie_key = "TU_CLAVE_ALEATORIA_LARGA"
+#
+# IMPORTANTE: una cookie no puede durar eternamente. El navegador la guarda hasta
+# un año y renovamos su vigencia cuando el administrador vuelve a utilizar la app.
+# Esto evita cierre por inactividad y permite abrir Chrome otra vez sin contraseña.
+
+COOKIE_NOMBRE = "admin_login_v1"
+COOKIE_VIGENCIA_SEGUNDOS = 365 * 24 * 60 * 60
+RENOVAR_DESPUES_SEGUNDOS = 7 * 24 * 60 * 60
+
+password_admin = st.secrets.get("admin_password")
+auth_cookie_key = st.secrets.get("auth_cookie_key")
+if not password_admin:
+    st.error("Falta 'admin_password' en Secrets. No es seguro continuar.")
+    st.stop()
+if not auth_cookie_key or len(str(auth_cookie_key)) < 32:
+    st.error("Falta 'auth_cookie_key' en Secrets (mínimo 32 caracteres aleatorios).")
+    st.info("Añade auth_cookie_key con una clave aleatoria distinta de tu contraseña admin.")
+    st.stop()
+
+cookies = EncryptedCookieManager(
+    prefix="cronograma_zona1_admin/",
+    password=str(auth_cookie_key),
+)
+if not cookies.ready():
+    st.info("Cargando la sesión guardada...")
+    st.stop()
+
+
+def _firma_clave_actual():
+    """Cambia al cambiar la contraseña de administrador: invalida cookies anteriores."""
+    return hmac.new(
+        str(auth_cookie_key).encode("utf-8"),
+        ("cronograma-admin-v1:" + str(password_admin)).encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+
+
+def _crear_cookie_login():
+    """Guarda un comprobante cifrado; NUNCA guarda la contraseña en el navegador."""
+    contenido = {"v": 1, "issued_at": int(time.time()), "fingerprint": _firma_clave_actual()}
+    cookies[COOKIE_NOMBRE] = json.dumps(contenido, separators=(",", ":"))
+    cookies.save()
+
+
+def _cookie_login_valida():
+    try:
+        valor = cookies.get(COOKIE_NOMBRE)
+        if not valor:
+            return False
+        contenido = json.loads(valor)
+        ahora = int(time.time())
+        creado = contenido.get("issued_at")
+        if contenido.get("v") != 1 or type(creado) is not int:
+            return False
+        if creado > ahora + 60 or ahora - creado >= COOKIE_VIGENCIA_SEGUNDOS:
+            return False
+        firma = contenido.get("fingerprint", "")
+        if not isinstance(firma, str) or not hmac.compare_digest(firma, _firma_clave_actual()):
+            return False
+        # Renovación deslizante: si regresan después de una semana,
+        # la cookie vuelve a tener hasta 365 días desde esa visita.
+        if ahora - creado >= RENOVAR_DESPUES_SEGUNDOS:
+            _crear_cookie_login()
         return True
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
 
-    password_admin = st.secrets.get("admin_password")
-    if not password_admin:
-        st.error("Falta 'admin_password' en los secrets de la aplicación.")
-        st.stop()
 
-    def password_entered():
-        ingresada = str(st.session_state.get("password", ""))
-        st.session_state["password_correct"] = hmac.compare_digest(
-            ingresada.encode("utf-8"), str(password_admin).encode("utf-8")
-        )
-        st.session_state.pop("password", None)
+def check_password():
+    # Al volver a entrar desde este MISMO navegador, restaura la sesión.
+    if not st.session_state.get("admin_sesion_cerrada") and _cookie_login_valida():
+        return True
 
     _, col_centro, _ = st.columns([1, 1.5, 1])
     with col_centro:
@@ -178,16 +241,32 @@ def check_password():
                 unsafe_allow_html=True,
             )
             st.markdown("---")
-            st.text_input(
-                "🔑 Contraseña de Administrador",
-                type="password",
-                on_change=password_entered,
-                key="password",
-                placeholder="Ingresa tu contraseña",
-            )
-            if st.session_state.get("password_correct") is False:
-                st.error("😕 Contraseña incorrecta. Inténtalo de nuevo.")
+            with st.form("form_acceso_admin", clear_on_submit=True):
+                ingresada = st.text_input(
+                    "🔑 Contraseña de Administrador",
+                    type="password",
+                    placeholder="Ingresa tu contraseña",
+                )
+                enviado = st.form_submit_button("Iniciar sesión", use_container_width=True)
+            if enviado:
+                if hmac.compare_digest(
+                    str(ingresada).encode("utf-8"), str(password_admin).encode("utf-8")
+                ):
+                    st.session_state["admin_sesion_cerrada"] = False
+                    _crear_cookie_login()
+                    st.rerun()
+                else:
+                    st.error("😕 Contraseña incorrecta. Inténtalo de nuevo.")
     return False
+
+
+def cerrar_sesion():
+    """Elimina el recordatorio de acceso de ESTE navegador."""
+    if COOKIE_NOMBRE in cookies:
+        del cookies[COOKIE_NOMBRE]
+    cookies.save()
+    st.session_state["admin_sesion_cerrada"] = True
+    st.rerun()
 
 
 if not check_password():
@@ -414,6 +493,10 @@ with st.sidebar:
         menu_icon="pin-fill",
         default_index=0,
     )
+
+    st.markdown("---")
+    if st.button("🚪 Cerrar sesión", use_container_width=True, key="cerrar_sesion_admin"):
+        cerrar_sesion()
 
 # --- 1. SECCIÓN: CRONOGRAMA Y GESTIÓN ---
 if selected == "Cronograma y Gestión":
@@ -699,4 +782,3 @@ elif selected == "Tareas Completadas":
             st.info(
                 "Aún no has marcado ninguna tarea como terminada individualmente o la pestaña 'Completadas' no está configurada."
             )
-
