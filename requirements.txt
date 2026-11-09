@@ -5,3 +5,4 @@ oauth2client
 streamlit-calendar
 plotly
 streamlit-option-menu
+streamlit-cookies-manager
